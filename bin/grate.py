@@ -17,6 +17,7 @@ Run grate FIXME
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
 p.add_argument("--version", action="store_true", help="Display versions")
+p.add_argument("--update", action="store_true", help="Update to latest")
 p.add_argument(
     "gin",
     type=pathlib.Path,
@@ -32,6 +33,10 @@ if args.version:
     ivers = updates.get_installable_versions() or []
     print(f"Current version = {cver}\nGit hub version = {ghver}")
     print(f"Installable versions = {','.join(v['version'] for v in ivers)}")
+    sys.exit(0)
+
+if args.update:
+    updates.possibly_update()
     sys.exit(0)
 
 if args.gin is None:
