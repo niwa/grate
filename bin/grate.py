@@ -7,26 +7,34 @@
 import sys
 import argparse
 import pathlib
-import utils
+import updates
 
 # parse command line
 p = argparse.ArgumentParser(
     description="""
-Run grate
-FIXME
+Run grate FIXME
 """,
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
+p.add_argument("--version", action="store_true", help="Display versions")
 p.add_argument(
     "gin",
     type=pathlib.Path,
+    nargs="?",
     help="Grate input yaml file",
 )
+
 args = p.parse_args()
 
-print(f"Got {args.gin} input file")
+if args.version:
+    cver = updates.get_prog_version() or "unknown"
+    ghver = updates.get_github_version() or "unknown"
+    ivers = updates.get_installable_versions() or []
+    print(f"Current version = {cver}\nGit hub version = {ghver}")
+    print(f"Installable versions = {','.join(v['version'] for v in ivers)}")
+    sys.exit(0)
 
-utils.testit()
+if args.gin is None:
+    p.error("Specify <gin> yaml file")
 
-with open(utils.resolved_path("etc/datafile.txt")) as fh:
-    print(fh.read())
+print(f"Should do something with {args.gin}")
