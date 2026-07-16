@@ -68,7 +68,8 @@ def get_installable_versions():
                     "url": release["assets"][0]["browser_download_url"],
                 }
             )
-    except Exception:
+    except Exception as exp:
+        print(exp)
         return []
 
     return sorted(releases, key=lambda i: version.Version(i["version"]), reverse=True)
@@ -82,7 +83,8 @@ def possibly_update():
         return
 
     if version.parse(cver) >= version.parse(ivers[0]["version"]):
-        print(f"WARNING: {cver} is already up to date!")
+        print(f"{cver} is already latest")
+        return
 
     # update to ivers[0]
     r = input(f"Install version {ivers[0]['version']}? [y/N]: ").strip().lower()
