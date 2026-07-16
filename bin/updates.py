@@ -85,7 +85,7 @@ def possibly_update():
         print(f"WARNING: {cver} is already up to date!")
 
     # update to ivers[0]
-    r = input(f"Install newest version {ivers[0]['version']}? [y/N]: ").strip().lower()
+    r = input(f"Install version {ivers[0]['version']}? [y/N]: ").strip().lower()
 
     if r != "y":
         return

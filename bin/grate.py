@@ -32,7 +32,7 @@ if args.version:
     cver = updates.get_prog_version() or "unknown"
     ghver = updates.get_github_version() or "unknown"
     ivers = updates.get_installable_versions() or []
-    print(f"Current version = {cver}\nGit hub version = {ghver}")
+    print(f"Your version = {cver}\nGit hub version = {ghver}")
     print(f"Installable versions = {','.join(v['version'] for v in ivers)}")
     sys.exit(0)
 
