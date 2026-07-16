@@ -8,7 +8,7 @@ Currently there is only a command line version of the software.
 ## Installation
 
 Releases are provided [here](https://github.com/niwa/grate/releases).  Download
-the latest, run the installer and ignore any Microsoft Windows defender
+the latest `grate-x.y.z.exe`, run it without admin privileges, and ignore any Microsoft Windows defender
 warnings.  The installer will place a binary (grate.exe) in your user
 directory, and update your path.  Open a terminal and run `grate --help`
 
@@ -40,6 +40,7 @@ directory, and update your path.  Open a terminal and run `grate --help`
 ### Windows
 
 1. Install
+
     a. Visual studio community 2026 with Desktop development with C++ workload.
     b. Inno Setup 7
 
