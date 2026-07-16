@@ -77,14 +77,15 @@ def get_installable_versions():
 def possibly_update():
     cver = get_prog_version()
     ivers = get_installable_versions()
-    if not (cver and ivers) or version.parse(cver) >= version.parse(
-        ivers[0]["version"]
-    ):
-        print(f"All update with version {cver}")
+    if not (cver and ivers):
+        print("Cannot determine installable versions")
         return
 
+    if version.parse(cver) >= version.parse(ivers[0]["version"]):
+        print("WARNING: {cver} is already update!")
+
     # update to ivers[0]
-    r = input(f"Upgrade to version {ivers[0]['version']}? [y/N]: ").strip().lower()
+    r = input(f"Install version {ivers[0]['version']}? [y/N]: ").strip().lower()
 
     if r != "y":
         return

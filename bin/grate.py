@@ -8,7 +8,7 @@ import sys
 import argparse
 import pathlib
 import updates
-import packaging
+from packaging import version 
 
 # parse command line
 p = argparse.ArgumentParser(
@@ -46,14 +46,8 @@ if args.gin is None:
 # tell the user is they are out of date
 cver = updates.get_prog_version()
 ivers = updates.get_installable_versions()
-if (
-    cver
-    and ivers
-    and packaging.version.parse(cver) < packaging.version.parse(ivers[0]["version"])
-):
-    print(
-        f"WARNING: your version {cver} is old, run with --update to update to {ivers[0]['version']}"
-    )
+if cver and ivers and version.parse(cver) < version.parse(ivers[0]["version"]):
+    print(f"WARNING: ver {cver} is old, run with --update to get {ivers[0]['version']}")
 
 
 print(f"Should do something with {args.gin}")
