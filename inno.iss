@@ -12,7 +12,6 @@
 
 
 #define MyAppName "Grate"
-#define MyAppVersion "1.0"
 #define MyAppPublisher "Earthsciences NZ"
 #define MyAppURL "https://github.com/niwa/grate"
 #define MyAppExeName "grate.exe"
@@ -24,7 +23,6 @@
 AppId={{F7C8F2BB-15A6-461B-9881-16E688FE44F9}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-;AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
@@ -65,7 +63,6 @@ Source: "C:\Users\mattw\Documents\grate\grate.dist\etc\*"; DestDir: "{app}"; Fla
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 
-[Code]
 [Code]
 
 procedure EnvAddPath(Path: string);
