@@ -21,7 +21,7 @@ jobs:
       - name: Read current version
         id: get-version
         run: |
-          CURRENT_VERSION=$(grep -oP '(?<=Version: ).*' bin/version.txt || echo "0.0.0")
+          CURRENT_VERSION=$(grep -oP '(?<=Version: ).*' etc/version.txt || echo "0.0.0")
           echo "Current version is $CURRENT_VERSION"
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
 
@@ -33,14 +33,14 @@ jobs:
 
       - name: Write new version to bin/version.txt
         run: |
-          cat << EOF > bin/version.txt
+          cat << EOF > etc/version.txt
           Version: $NEW_VERSION
           Commit date: $(date -Iseconds)
           EOF
 
       - name: Commit and push new version
         run: |
-          git add bin/version.txt
+          git add etc/version.txt
           git commit -m "Bump version to $NEW_VERSION"
           git tag $NEW_VERSION
           git push origin HEAD $NEW_VERSION
