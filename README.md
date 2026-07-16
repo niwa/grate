@@ -34,13 +34,20 @@ a terminal and run `grate.exe`
 
 ### Windows
 
-1. Install Python 3.13 or newer.
+1. Install
+    a. Python 3.13 or newer.
+    b. Visual studio community 2026 with Desktop development with C++ workload.
+    c. Inno Setup 7
 
 2. Make a virtual environment and install packages
     ```
     python -m venv ~/Documents/venvs/grate
     . ~/Documents/venvs/grate/Scripts/activate
-    pip install --upgrade pip
+    python -m pip install --upgrade pip
     pip install -r requirements.pip
     ```
+3. Run using `python bin/grate.py <input file>`
+
+4. Make a standalone `grate.dist/` directory using `python -m nuitka bin/grate.py`
+
 

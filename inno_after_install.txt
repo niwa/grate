@@ -1,0 +1,2 @@
+This is a command line program.  Start a terminal or shell and type
+grate --help

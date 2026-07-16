@@ -1,0 +1,47 @@
+name: Bump Version
+
+on:
+  push:
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required to push later
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Read current version
+        id: get-version
+        run: |
+          CURRENT_VERSION=$(grep -oP '(?<=Version: ).*' bin/version.txt || echo "0.0.0")
+          echo "Current version is $CURRENT_VERSION"
+          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+
+      - name: Increment version
+        run: |
+          NEW_VERSION=$(bash bin/increment_version.sh -p "$CURRENT_VERSION")
+          echo "New version: $NEW_VERSION"
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Write new version to bin/version.txt
+        run: |
+          cat << EOF > bin/version.txt
+          Version: $NEW_VERSION
+          Commit date: $(date -Iseconds)
+          EOF
+
+      - name: Commit and push new version
+        run: |
+          git add bin/version.txt
+          git commit -m "Bump version to $NEW_VERSION"
+          git tag $NEW_VERSION
+          git push origin HEAD $NEW_VERSION
+
