@@ -37,7 +37,10 @@ OPTIONAL_SECTION_MAPPINGS = {
 }
 
 GIN_VALUE_MAPPINGS = {
-    ("model", "type"): {"1": "flume", "2": "waterway", "4": "braided_channel"}
+    ("model", "type"): {
+        "1": "flume",
+        "4": "braided_channel",
+    }
 }
 SECTIONS_TO_IGNORE = ["bed_layer", "active_layer"]
 
@@ -205,6 +208,118 @@ def parse_sediment_ripping_line(line, kv):
         )
 
 
+class BraidedChannelXsectTransformer(lark.Transformer):
+    def start(self, items):
+        return {
+            "header": items[0],
+            "cross_sections": items[1:],
+        }
+
+    def header(self, items):
+        return {
+            "nsect": int(items[0]),
+            "formrf": float(items[2]),
+        }
+
+    def cross_section(self, items):
+        result = {}
+        for item in items:
+            result.update(item)
+        return result
+
+    def topoid(self, items):
+        return {"topoid": str(items[0])}
+
+    def river_name(self, items):
+        return {"river_name": str(items[0])}
+
+    def chainage(self, items):
+        return {"chainage": float(items[0])}
+
+    def property(self, items):
+        return items[0]
+
+    def formrf(self, items):
+        return {"formrf": float(items[1])}
+
+    def bankd90(self, items):
+        return {"bankd90": float(items[1])}
+
+    def storage(self, items):
+        return {
+            "active_layer_group": int(items[1]),
+            "storage_layer_group": int(items[2]),
+        }
+
+    def bedrock(self, items):
+        return {"bedrock_rl": float(items[1])}
+
+    def lsf(self, items):
+        return {"lsf": float(items[1])}
+
+    def qsfact(self, items):
+        return {"qsfact": float(items[1])}
+
+    def profile(self, items):
+        return {"profile": [t for t in items if isinstance(t, tuple)]}
+
+    def profilerow(self, items):
+        return tuple(map(float, items[:-1]))
+
+
+def parse_braided_channel_xsectfile(ifile, ofile, kv):
+    """Parse braided channel (type 4) ifile updating kv and writing ofile with new section info"""
+
+    par = lark.Lark.open(
+        utils.resolved_path("etc/gin_model_grammars/braided_channel.ebnf"),
+        parser="lalr",
+    )
+    tree = par.parse(
+        "".join(
+            n
+            for n in open(ifile, encoding="utf-8-sig")
+            if n.strip() and not n.strip().startswith("!")
+        )
+    )
+
+    cfg = BraidedChannelXsectTransformer().transform(tree)
+
+    # build dataframe rows from cfg
+    rows = []
+    for xs in cfg["cross_sections"]:
+        for pt in xs["profile"]:
+            row = {
+                "chainage": xs["chainage"],
+                "x": pt[0],
+                "y": pt[1],
+                "topoid": xs["topoid"],
+                "river_name": xs["river_name"],
+                "formrf": xs.get("formrf"),
+                "bankd90": xs.get("bankd90"),
+                "active_layer_group": xs.get("active_layer_group"),
+                "storage_layer_group": xs.get("storage_layer_group"),
+                "bedrock_rl": xs.get("bedrock_rl"),
+                "lsf": xs.get("lsf"),
+                "qsfact": xs.get("qsfact"),
+            }
+            if len(pt) > 2:
+                row["relrf"] = pt[2]
+            if len(pt) > 3:
+                row["ob"] = pt[3]
+            rows.append(row)
+
+    df = pd.DataFrame(rows)
+    df.to_csv(ofile, index=False)
+
+    # check number of sections match
+    assert cfg["header"]["nsect"] == len(cfg["cross_sections"]), (
+        f"{ifile} has {len(cfg['cross_sections'])} PROFILES which doesn't match NSECT = {cfg['header']['nsect']}"
+    )
+
+    kv["cross_sections"] = {k: v for k, v in cfg["header"].items() if k != "nsect"}
+    kv["cross_sections"]["xsectfile"] = str(ofile)
+
+
 class FlumeXsectTransformer(lark.Transformer):
     def start(self, items):
         return {
@@ -270,9 +385,7 @@ class FlumeXsectTransformer(lark.Transformer):
         return {"lsf": float(items[1])}
 
     def profile(self, items):
-        return {
-            "profile": items[2:6]  # skip PROFILE token
-        }
+        return {"profile": [t for t in items if isinstance(t, tuple)]}
 
     def point(self, items):
         return (float(items[0]), float(items[1]))
@@ -281,8 +394,14 @@ class FlumeXsectTransformer(lark.Transformer):
 def parse_flume_xsectfile(ifile, ofile, kv):
     """Parse flume ifile updating kv and writing ofile with new section info"""
 
-    par = lark.Lark.open(utils.resolved_path("etc/flume_xsect.ebnf"))
-    tree = par.parse(open(ifile, "r").read())
+    par = lark.Lark.open(utils.resolved_path("etc/gin_model_grammars/flume.ebnf"))
+    tree = par.parse(
+        "".join(
+            n
+            for n in open(ifile, encoding="utf-8-sig")
+            if n.strip() and not n.strip().startswith("!")
+        )
+    )
     config = FlumeXsectTransformer().transform(tree)
 
     df = pd.DataFrame(
@@ -309,14 +428,7 @@ def parse_flume_xsectfile(ifile, ofile, kv):
         f"{ifile} has {len(df)} PROFILES which doesn't match NSECT = {config['header']['nsect']}"
     )
 
-    # get the key = val from ifile
-    section = "cross_sections"
-    for key, val in config["header"].items():
-        if key == "nsect":
-            continue
-        key = ykey(key)
-        kv.setdefault(section, {})[key] = yval(section, key, val)
-
+    kv["cross_sections"] = {k: v for k, v in config["header"].items() if k != "nsect"}
     kv["cross_sections"]["xsectfile"] = str(ofile)
 
 
@@ -387,7 +499,7 @@ def parse_grain_size_profiles(kv):
 
 
 def replace_section_headers(lines: list[str], mappings: dict, sep: str) -> list[str]:
-    """Replace legacy section headers with standardised names.
+    """Replace gin section headers with standardised names.
 
     Parameters
     ----------
@@ -403,11 +515,10 @@ def replace_section_headers(lines: list[str], mappings: dict, sep: str) -> list[
 
     result = []
     i = 0
-
     while i < len(lines):
         line = lines[i]
 
-        # Look for separator line, e.g. ! ========
+        # Look for separator line, ! ======== or ! --------
         s = rf"!\s*{re.escape(sep)}{{6,}}\s*\n"
         if (
             re.fullmatch(s, line)
@@ -485,14 +596,19 @@ def parse_gin(fname: pathlib.Path) -> dict:
 
     # parse xsect if known model type
     assert "cross_sections" in kv and "xsectfile" in kv["cross_sections"]
-    if kv["model"]["type"] == "flume":
-        ifile = fname.parent / pathlib.Path(kv["cross_sections"]["xsectfile"])
-        ofile = ifile.with_suffix(".csv")
-        parse_flume_xsectfile(ifile, ofile, kv)
-    else:
-        sys.stderr.write(
-            "Can only handle flume model, left cross sections file alone\n"
-        )
+    ifile = fname.parent / pathlib.Path(kv["cross_sections"]["xsectfile"])
+    ofile = ifile.with_suffix(".csv")
+    match kv["model"]["type"]:
+        case "flume":
+            print(f"Converting {ifile} to {ofile}")
+            parse_flume_xsectfile(ifile, ofile, kv)
+        case "braided_channel":  # type 4
+            print(f"Converting {ifile} to {ofile}")
+            parse_braided_channel_xsectfile(ifile, ofile, kv)
+        case _:
+            sys.stderr.write(
+                "Can only handle flume model, left cross sections file alone\n"
+            )
 
     return kv
 

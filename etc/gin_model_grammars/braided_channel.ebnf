@@ -1,42 +1,34 @@
 start : header cross_section+
 
-header : "NSECT" "=" INT NEWLINE "FORMRF" "=" NUMBER NEWLINE "WALLRF" "=" NUMBER NEWLINE
+header : "NSECT" "=" INT NEWLINE "FORMRF" "=" NUMBER NEWLINE 
 
 cross_section: topoid river_name chainage property* profile
 
-topoid: STRING NEWLINE
-
-river_name: STRING NEWLINE
-
+topoid: TEXTLINE NEWLINE
+river_name: TEXTLINE NEWLINE
 chainage: NUMBER NEWLINE
 
 property: formrf
-        | manningrf
         | bankd90
         | storage
         | bedrock
         | lsf
+        | qsfact
 
 formrf: ("FORMRF" | "FOR") NEWLINE NUMBER NEWLINE
-
-manningrf: ("MANNINGRF" | "MAN") NEWLINE NUMBER NEWLINE
-
 bankd90: "BANKD90" NEWLINE NUMBER NEWLINE
-
-storage: ("STORAGE" | "STO") NEWLINE INT INT NEWLINE
-
+storage: ("STORAGE" | "STO") NEWLINE SIGNED_INT SIGNED_INT NEWLINE
 bedrock: "BEDROCK RL" NEWLINE NUMBER NEWLINE
-
 lsf: "LSF" NEWLINE NUMBER NEWLINE
+qsfact: "QSFACT" NEWLINE NUMBER NEWLINE
 
-profile: PROFILE NEWLINE point point point point END_PROFILE NEWLINE?
-point: NUMBER NUMBER NEWLINE
-PROFILE: "PROFILE" | "PRO"
-END_PROFILE: "***"
+profile: ("PROFILE" | "PRO") NEWLINE profilerow+ "***" NEWLINE?
+profilerow: NUMBER NUMBER NUMBER* NEWLINE
 
 
-STRING : /[^\n]+/
+TEXTLINE.10: /[^\n]+/
 
+%import common.SIGNED_INT
 %import common.INT
 %import common.SIGNED_NUMBER -> NUMBER
 %import common.WS_INLINE
