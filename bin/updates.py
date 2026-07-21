@@ -75,6 +75,13 @@ def get_installable_versions():
     return sorted(releases, key=lambda i: version.Version(i["version"]), reverse=True)
 
 
+def version_check():
+    cver = get_prog_version()
+    ivers = get_installable_versions()
+    if cver and ivers and version.parse(cver) < version.parse(ivers[0]["version"]):
+        print(f"WARNING: ver {cver} is old, run update to get {ivers[0]['version']}")
+
+
 def possibly_update():
     cver = get_prog_version()
     ivers = get_installable_versions()

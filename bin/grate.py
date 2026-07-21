@@ -6,9 +6,11 @@
 
 import sys
 import argparse
+import yaml
 import pathlib
 import updates
-from packaging import version 
+from convert_gin import parse_gin
+from packaging import version
 
 # parse command line
 p = argparse.ArgumentParser(
@@ -17,37 +19,42 @@ Run grate FIXME
 """,
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
-p.add_argument("--version", action="store_true", help="Display versions")
-p.add_argument("--update", action="store_true", help="Update to latest")
-p.add_argument(
-    "gin",
-    type=pathlib.Path,
-    nargs="?",
-    help="Grate input yaml file",
-)
+sub = p.add_subparsers(dest="command")
+sub.add_parser("versions", help="Display versions")
+sub.add_parser("update", help="Update to latest version")
+convert = sub.add_parser("convert", help="Convert old gin file to yaml")
+convert.add_argument("gin", type=pathlib.Path, help="Input gin file")
+convert.add_argument("yaml", type=pathlib.Path, help="Output yaml file")
+runmode = sub.add_parser("run", help="Run yaml model")
+runmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
+runmode.add_argument("--skip-ver-chk", action="store_true", help="Skip version check")
+
+commands = {"versions", "update", "convert", "run"}
+if len(sys.argv) > 1 and not any(arg in commands for arg in sys.argv[1:]):
+    sys.argv.insert(1, "run")
 
 args = p.parse_args()
 
-if args.version:
-    cver = updates.get_prog_version() or "unknown"
-    ghver = updates.get_github_version() or "unknown"
-    ivers = updates.get_installable_versions() or []
-    print(f"Your version = {cver}\nGit hub version = {ghver}")
-    print(f"Installable versions = {','.join(v['version'] for v in ivers)}")
-    sys.exit(0)
+match args.command:
+    case "versions":
+        cver = updates.get_prog_version() or "unknown"
+        ghver = updates.get_github_version() or "unknown"
+        ivers = updates.get_installable_versions() or []
+        print(f"Your version = {cver}\nGit hub version = {ghver}")
+        print(f"Installable versions = {','.join(v['version'] for v in ivers)}")
 
-if args.update:
-    updates.possibly_update()
-    sys.exit(0)
+    case "update":
+        updates.possibly_update()
 
-if args.gin is None:
-    p.error("Specify <gin> yaml file")
+    case "convert":
+        print(f"Parsing {args.gin}")
+        conf = parse_gin(args.gin)
+        with open(args.yaml, "w") as fh:
+            yaml.dump(conf, fh, default_flow_style=False, sort_keys=False)
+        print(f"Written to {args.yaml}")
 
-# tell the user is they are out of date
-cver = updates.get_prog_version()
-ivers = updates.get_installable_versions()
-if cver and ivers and version.parse(cver) < version.parse(ivers[0]["version"]):
-    print(f"WARNING: ver {cver} is old, run with --update to get {ivers[0]['version']}")
-
-
-print(f"Should do something with {args.gin}")
+    case "run":
+        # tell the user is they are out of date
+        if not args.skip_ver_chk:
+            updates.version_check()
+        print(f"Should do something with {args.yaml}")

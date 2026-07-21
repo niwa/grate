@@ -22,3 +22,16 @@ def resolved_path(rpath):
         base = pathlib.Path(__file__).parent.parent
 
     return base / rpath
+
+
+def try_to_num(val: str):
+    """Convert string to int or float if possible, otherwise leave as string."""
+    try:
+        return int(val)
+    except ValueError:
+        pass
+    try:
+        return float(val)
+    except ValueError:
+        pass
+    return val

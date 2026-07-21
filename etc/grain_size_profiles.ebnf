@@ -1,0 +1,25 @@
+start : ngrain nclasses nlith abrasion sediment datarows
+
+ngrain: "NGRP" "=" INT NEWLINE
+
+nclasses: "NGSZ" "=" INT NEWLINE
+
+nlith: "NLITH" "=" INT NEWLINE
+
+abrasion: NUMBER+ NEWLINE
+
+sediment: NUMBER+ NEWLINE
+
+datarows: nums+
+nums: NUMBER+ NEWLINE
+
+STRING : /[^\n]+/
+
+%import common.INT
+%import common.SIGNED_NUMBER -> NUMBER
+%import common.WS_INLINE
+%import common.NEWLINE
+%ignore WS_INLINE
+
+COMMENT: /![^\n]*/
+%ignore COMMENT
