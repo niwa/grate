@@ -566,9 +566,6 @@ def parse_gin(fname: pathlib.Path) -> dict:
     lines = replace_section_headers(lines, SECTION_MAPPINGS, sep="=")
     lines = replace_section_headers(lines, OPTIONAL_SECTION_MAPPINGS, sep="-")
 
-    # for el in lines:
-    #     print(el, end="")
-
     kv = {}
     for line in lines:
         match state:

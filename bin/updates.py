@@ -2,6 +2,7 @@ import os
 import pathlib
 import requests
 import platformdirs
+import datetime as dt
 from packaging import version
 
 import utils
@@ -76,6 +77,16 @@ def get_installable_versions():
 
 
 def version_check():
+    state_dir = pathlib.Path(platformdirs.user_state_dir("grate"))
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    stamp = state_dir / "last_version_check"
+    if stamp.exists():
+        last = dt.datetime.fromtimestamp(stamp.stat().st_mtime)
+        if dt.datetime.now() - last < dt.timedelta(days=1):
+            return
+
+    stamp.touch()
     cver = get_prog_version()
     ivers = get_installable_versions()
     if cver and ivers and version.parse(cver) < version.parse(ivers[0]["version"]):

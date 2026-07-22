@@ -4,18 +4,16 @@
 # nuitka-project: --mode=standalone
 # nuitka-project: --include-data-dir=etc=etc
 
-import sys
 import argparse
 import yaml
 import pathlib
 import updates
 from convert_gin import parse_gin
-from packaging import version
 
 # parse command line
 p = argparse.ArgumentParser(
     description="""
-Run grate FIXME
+Convert gin grate models to yaml and run them
 """,
     formatter_class=argparse.ArgumentDefaultsHelpFormatter,
 )
@@ -27,7 +25,6 @@ convert.add_argument("gin", type=pathlib.Path, help="Input gin file")
 convert.add_argument("yaml", type=pathlib.Path, help="Output yaml file")
 runmode = sub.add_parser("run", help="Run yaml model")
 runmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
-runmode.add_argument("--skip-ver-chk", action="store_true", help="Skip version check")
 
 args = p.parse_args()
 
@@ -50,7 +47,5 @@ match args.command:
         print(f"Written to {args.yaml}")
 
     case "run":
-        # tell the user is they are out of date
-        if not args.skip_ver_chk:
-            updates.version_check()
+        updates.version_check()
         print(f"Should do something with {args.yaml}")
