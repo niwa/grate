@@ -29,10 +29,6 @@ runmode = sub.add_parser("run", help="Run yaml model")
 runmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
 runmode.add_argument("--skip-ver-chk", action="store_true", help="Skip version check")
 
-commands = {"versions", "update", "convert", "run"}
-if len(sys.argv) > 1 and not any(arg in commands for arg in sys.argv[1:]):
-    sys.argv.insert(1, "run")
-
 args = p.parse_args()
 
 match args.command:
