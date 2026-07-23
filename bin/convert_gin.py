@@ -43,6 +43,7 @@ GIN_VALUE_MAPPINGS = {
     }
 }
 SECTIONS_TO_IGNORE = ["bed_layer", "active_layer"]
+KEYS_TO_IGNORE = ["VERSID"]
 
 
 def ykey(key: str) -> str:
@@ -70,6 +71,9 @@ def parse_keyval_line(line):
     key, value = None, None
     if line and line.count("=") == 1:
         key, value = (s.strip() for s in line.split("=", 1))
+
+    if key in KEYS_TO_IGNORE:
+        return None, None
 
     return (key, value)
 
@@ -498,6 +502,18 @@ def parse_grain_size_profiles(kv):
         kv["grain_size_profiles"]["lithfractions"] = lrows
 
 
+def adhoc_fixes(lines: list[str]) -> list[str]:
+    """Any weird broken things that can't be generalized"""
+    newlines = []
+    for e in lines:
+        # comment character mistakenly typed as ' in a lot of examples
+        if ma := re.search(r"NCALPTS\s*=\s*(\S+)\s*'\s*Number of points in eac", e):
+            e = f"NCALPTS = {ma.group(1)}"
+        newlines.append(e)
+
+    return newlines
+
+
 def replace_section_headers(lines: list[str], mappings: dict, sep: str) -> list[str]:
     """Replace gin section headers with standardised names.
 
@@ -563,6 +579,7 @@ def parse_gin(fname: pathlib.Path) -> dict:
     with open(fname, "r", encoding="utf-8-sig") as fh:
         lines = fh.readlines()
 
+    lines = adhoc_fixes(lines)
     lines = replace_section_headers(lines, SECTION_MAPPINGS, sep="=")
     lines = replace_section_headers(lines, OPTIONAL_SECTION_MAPPINGS, sep="-")
 
