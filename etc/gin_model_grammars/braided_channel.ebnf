@@ -1,6 +1,6 @@
 start : header cross_section+
 
-header : "NSECT" "=" INT NEWLINE "FORMRF" "=" NUMBER NEWLINE 
+header : "NSECT" "=" INT NEWLINE "FORMRF" "=" NUMBER NEWLINE ("WALLRF" "=" NUMBER NEWLINE)?
 
 cross_section: topoid river_name chainage property* profile
 
@@ -26,7 +26,7 @@ profile: ("PROFILE" | "PRO") NEWLINE profilerow+ "***" NEWLINE?
 profilerow: NUMBER NUMBER NUMBER* NEWLINE
 
 
-TEXTLINE.10: /[^\n]+/
+TEXTLINE.-1: /[^\n\*\=]+/
 
 %import common.SIGNED_INT
 %import common.INT
@@ -37,3 +37,4 @@ TEXTLINE.10: /[^\n]+/
 
 COMMENT: /![^\n]*/
 %ignore COMMENT
+
