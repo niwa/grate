@@ -1,7 +1,9 @@
 import datetime as dt
+import pandas as pd
 import pathlib
 import typing
 import pydantic as p
+from dataclasses import dataclass
 
 
 class GrateBase(p.BaseModel):
@@ -91,6 +93,37 @@ InflowBoundary = typing.Annotated[
     typing.Union[InflowBoundaryTS, InflowBoundaryConst],
     p.Field(discriminator="type"),
 ]
+
+
+@dataclass
+class RuntimeInflowBoundary:
+    ordinate: float
+    type: str
+    value: float | pd.Series
+
+    def value_at(self, t: pd.Timestamp) -> float:
+        if self.type == "const":
+            return self.value
+
+        s = self.value
+        if t in s.index:
+            return float(s.loc[t])
+
+        # have to interpolate
+        pos = s.index.searchsorted(t)
+
+        # bounds check
+        if pos == 0:
+            return float(s.iloc[0])
+        if pos == len(s):
+            return float(s.iloc[-1])
+
+        t0 = s.index[pos - 1]
+        t1 = s.index[pos]
+        v0 = s.iloc[pos - 1]
+        v1 = s.iloc[pos]
+        fraction = (t - t0) / (t1 - t0)
+        return float(v0 + fraction * (v1 - v0))
 
 
 class DownstreamBoundaryTS(GrateBase):
@@ -185,6 +218,7 @@ class GrateConfig(GrateBase):
     cross_sections: CrossSections
 
     inflow_boundary: list[InflowBoundary]
+    _processed_inflow: list[RuntimeInflowBoundary] = p.PrivateAttr(default_factory=list)
     downstream_boundary: DownstreamBoundary
     sediment_boundary: list[SedimentBoundary]
 
@@ -196,15 +230,19 @@ class GrateConfig(GrateBase):
     print: PrintOptions
 
     @p.model_validator(mode="after")
-    def check_cross_sections(self):
+    def post_validate(self):
+        self._check_cross_sections()
+        self._check_grain_size()
+        self._load_inflow_timeseries()
+        return self
+
+    def _check_cross_sections(self):
         if self.model.type == "flume" and self.cross_sections.wallrf is None:
             raise ValueError("cross_sections.wallrf is required for flume models")
         elif self.model.type != "flume" and self.cross_sections.wallrf is not None:
             raise ValueError("cross_sections.wallrf is only valid for flume models")
-        return self
 
-    @p.model_validator(mode="after")
-    def check_grain_size(self):
+    def _check_grain_size(self):
         nprof = self.grain_size_profiles.num_profiles
         nbins = self.grain_size_profiles.num_bins
         nlith = self.grain_size_profiles.num_lith
@@ -227,4 +265,18 @@ class GrateConfig(GrateBase):
                     f"grain_size_profiles: {nprof=} but number of columns is {len(row)}"
                 )
 
-        return self
+    def _load_inflow_timeseries(self):
+        self._processed_inflow.clear()
+        for boundary in self.inflow_boundary:
+            val = boundary.value
+            if boundary.type == "ts":
+                val = pd.read_csv(val, index_col=0, parse_dates=True)[
+                    "flow"
+                ].sort_index()
+            self._processed_inflow.append(
+                RuntimeInflowBoundary(
+                    ordinate=boundary.ordinate,
+                    type=boundary.type,
+                    value=val,
+                )
+            )

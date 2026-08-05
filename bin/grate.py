@@ -21,7 +21,6 @@ Convert gin grate models to yaml and run them
 sub = p.add_subparsers(dest="command")
 sub.add_parser("versions", help="Display versions")
 sub.add_parser("update", help="Update to latest version")
-
 convert = sub.add_parser(
     "convert",
     help="Convert old gin file to yaml",
@@ -47,10 +46,8 @@ Files referenced by gin file are not currently checked
     formatter_class=argparse.RawDescriptionHelpFormatter,
 )
 validate.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
-
 runmode = sub.add_parser("run", help="Run yaml model")
 runmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
-
 args = p.parse_args()
 
 match args.command:
@@ -79,3 +76,6 @@ match args.command:
     case "run":
         updates.version_check()
         print(f"Should do something with {args.yaml}")
+
+    case _:
+        p.print_help()

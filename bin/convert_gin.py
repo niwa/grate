@@ -1,6 +1,7 @@
 import sys
 import argparse
 import pathlib
+from pathlib import PureWindowsPath
 import yaml
 import re
 import lark
@@ -81,14 +82,30 @@ def parse_keyval_line(line):
     return (key, value)
 
 
-def parse_section_line(section, line, kv):
-    """Add stuff to kv depending on what section we are in"""
+def parse_section_line(section, line, kv, bdir):
+    """Add stuff to kv depending on what section we are in
+
+    Parameters
+    ----------
+    section: str
+        Section we are in
+
+    line: str
+        The line
+
+    kv: dict
+        Maps key (section) to value (most like a list)
+
+    bdir: pathlib.Path
+        Base path that .dat files etc are relative to
+    """
+
     if section in SECTIONS_TO_IGNORE:
         return
     match section:
         case "inflow_boundary":
             kv.setdefault("inflow_boundary", [])
-            parse_inflow_boundary_line(line, kv["inflow_boundary"])
+            parse_inflow_boundary_line(line, kv["inflow_boundary"], bdir)
         case "downstream_boundary":
             parse_downstream_boundary_line(line, kv)
         case "sediment_boundary":
@@ -113,7 +130,39 @@ def parse_section_line(section, line, kv):
             kv.setdefault(section, {})[key] = yval(section, key, value)
 
 
-def parse_inflow_boundary_line(line, kv):
+def convert_timeseries(infile, outfile):
+    """Convert old timeseries format to csv"""
+
+    with open(infile) as f:
+        lines = [
+            line for line in f if not line.startswith("!") and len(line.split()) == 3
+        ]
+    df = pd.DataFrame(
+        [line.split() for line in lines], columns=["date", "time", "flow"]
+    )
+
+    df["time"] = pd.to_datetime(
+        df["date"].astype(str) + df["time"].astype(str), format="%Y%m%d%H%M%S"
+    )
+    df = df[["time", "flow"]].set_index("time")
+    df.to_csv(outfile, date_format="%Y-%m-%dT%H:%M:%S")
+
+
+def parse_inflow_boundary_line(line, kv, bdir):
+    """Parse inflow, if ts, convert file.
+
+    Parameters
+    ----------
+    line: str
+        The line
+
+    kv: dict
+        Maps key (section) to value (most like a list)
+
+    bdir: pathlib.Path
+        Base path that .dat files etc are relative to
+    """
+
     ma = re.match(r"(\d+)\s+(C|TS)\s+(.*)", line, re.I)
     if not ma:
         return
@@ -126,11 +175,16 @@ def parse_inflow_boundary_line(line, kv):
             }
         )
     else:
+        # full paths for conversion
+        fname = pathlib.Path(PureWindowsPath(ma.group(3)))
+        infile = bdir / fname
+        outfile = infile.with_suffix(".csv")
+        convert_timeseries(infile, outfile)
         kv.append(
             {
                 "ordinate": int(ma.group(1)),
                 "type": "ts",
-                "value": ma.group(3),
+                "value": str(fname.with_suffix(".csv")),
             }
         )
 
@@ -278,9 +332,22 @@ class XsectTransformer(lark.Transformer):
         return tuple(map(float, items[:-1]))
 
 
-def parse_allmodels_xsectfile(ifile, ofile: str, kv):
-    """Parse flume (type 1), river (type 2) and braided channel (type 4) ifile updating kv and writing a bunch of
-    csv files with prefix ofile with new profile info"""
+def parse_allmodels_xsectfile(bdir, ifile: pathlib.Path, kv):
+    """Parse flume (type 1), river (type 2) and braided channel (type 4) ifile updating kv
+
+    Writes a bunch of csv files
+
+    Parameters
+    ----------
+    bdir: pathlib.Path
+        Base directory where ifile is
+
+    ifile: pathlib.Path
+        Relative path to bdir
+
+    kv: dict
+        Maps sections to values
+    """
 
     par = lark.Lark.open(
         utils.resolved_path("etc/gin_model_grammars/braided_channel.ebnf"),
@@ -289,7 +356,7 @@ def parse_allmodels_xsectfile(ifile, ofile: str, kv):
     tree = par.parse(
         "".join(
             n
-            for n in open(ifile, encoding="utf-8-sig")
+            for n in open(bdir / ifile, encoding="utf-8-sig")
             if n.strip() and not n.strip().startswith("!")
         )
     )
@@ -305,7 +372,6 @@ def parse_allmodels_xsectfile(ifile, ofile: str, kv):
     kv["cross_sections"]["profiles"] = []
 
     for xs in cfg["cross_sections"]:
-        pfile = f"{ofile}_{xs['chainage']}.csv"
         p = {
             "chainage": xs["chainage"],
             "topoid": xs["topoid"],
@@ -323,7 +389,7 @@ def parse_allmodels_xsectfile(ifile, ofile: str, kv):
             if xs.get(k, None):
                 p[k] = xs[k]
 
-        p["profile"] = pfile
+        p["profile"] = f"{ifile.with_suffix('')}_{xs['chainage']}.csv"
         kv["cross_sections"]["profiles"].append(p)
 
         rows = []
@@ -335,7 +401,7 @@ def parse_allmodels_xsectfile(ifile, ofile: str, kv):
                 row["ob"] = pt[3]
             rows.append(row)
         df = pd.DataFrame(rows)
-        df.to_csv(pfile, index=False)
+        df.to_csv(bdir / p["profile"], index=False)
 
 
 class GrainSizeProfilesTransformer(lark.Transformer):
@@ -505,12 +571,14 @@ def parse_gin(fname: pathlib.Path) -> dict:
 
             case "expect header end" if line.startswith("! ========="):
                 state = "reading section"
+                if section == "inflow_boundary":
+                    print("Parsing all inflow boundary .dat files")
 
             case "reading section":
                 if line.startswith("! ======"):
                     state = "expect section name"
                     continue
-                parse_section_line(section, line, kv)
+                parse_section_line(section, line, kv, fname.parent)
 
     # parse grain sizes
     assert len(kv.setdefault("grain_size_profiles", "")) > 0, (
@@ -520,12 +588,11 @@ def parse_gin(fname: pathlib.Path) -> dict:
 
     # parse xsect if known model type
     assert "cross_sections" in kv and "xsectfile" in kv["cross_sections"]
-    ifile = fname.parent / pathlib.Path(kv["cross_sections"]["xsectfile"])
-    ofile = str(ifile.with_suffix(""))
-    print(f"Converting {ifile} to {ofile}")
+    ifile = pathlib.Path(pathlib.PureWindowsPath(kv["cross_sections"]["xsectfile"]))
+    print(f"Converting {ifile} to {ifile.with_suffix('.csv')}")
     match kv["model"]["type"]:
         case "flume" | "river" | "braided_channel":
-            parse_allmodels_xsectfile(ifile, ofile, kv)
+            parse_allmodels_xsectfile(fname.parent, ifile, kv)
         case _:
             sys.stderr.write(
                 "Can only handle flume, river and braided_channel model, left cross sections file alone\n"
