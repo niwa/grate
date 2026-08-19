@@ -1,3 +1,4 @@
+import math
 import datetime as dt
 import pandas as pd
 import pathlib
@@ -24,7 +25,6 @@ class SimulationTime(GrateBase):
     num_cycles: p.StrictInt
     max_dt_qs: p.StrictFloat
     max_dt_fd: p.StrictFloat
-    max_dx: p.StrictFloat
     cdt: p.StrictFloat
     max_dq_over_dt: p.StrictFloat
 
@@ -55,6 +55,16 @@ class Discretisation(GrateBase):
     theta: p.StrictFloat
     theta_s: p.StrictFloat
     psi_s: p.StrictFloat
+    chainage_min: p.StrictFloat
+    chainage_max: p.StrictFloat
+    max_dc: p.StrictFloat
+
+    @p.computed_field
+    @property
+    def dc(self) -> float:
+        length = self.chainage_max - self.chainage_min
+        num = math.ceil(length / self.max_dc)
+        return length / num
 
 
 class CrossSectionProfiles(GrateBase):
@@ -124,6 +134,40 @@ class RuntimeInflowBoundary:
         v1 = s.iloc[pos]
         fraction = (t - t0) / (t1 - t0)
         return float(v0 + fraction * (v1 - v0))
+
+
+@dataclass
+class RuntimeDownstreamBoundary:
+    ordinate: float
+    type: str
+    value: float | pd.Series
+
+    def value_at(self, t: pd.Timestamp) -> dict:
+        if self.type in ("elevation", "depth"):
+            return {self.type: self.value}
+
+        if self.type == "normal":
+            return {self.type: {"slope": self.slope, "hinit": self.hinit}}
+
+        s = self.value
+        if t in s.index:
+            return float(s.loc[t])
+
+        # have to interpolate
+        pos = s.index.searchsorted(t)
+
+        # bounds check
+        if pos == 0:
+            return float(s.iloc[0])
+        if pos == len(s):
+            return float(s.iloc[-1])
+
+        t0 = s.index[pos - 1]
+        t1 = s.index[pos]
+        v0 = s.iloc[pos - 1]
+        v1 = s.iloc[pos]
+        fraction = (t - t0) / (t1 - t0)
+        return {"elevation": float(v0 + fraction * (v1 - v0))}
 
 
 class DownstreamBoundaryTS(GrateBase):
@@ -220,6 +264,9 @@ class GrateConfig(GrateBase):
     inflow_boundary: list[InflowBoundary]
     _processed_inflow: list[RuntimeInflowBoundary] = p.PrivateAttr(default_factory=list)
     downstream_boundary: DownstreamBoundary
+    _processed_downstream_boundary: RuntimeDownstreamBoundary = p.PrivateAttr(
+        defaut=None
+    )
     sediment_boundary: list[SedimentBoundary]
 
     sediment_extraction: list[SedimentExtraction] = []
@@ -231,10 +278,16 @@ class GrateConfig(GrateBase):
 
     @p.model_validator(mode="after")
     def post_validate(self):
+        self._check_discretisation()
         self._check_cross_sections()
         self._check_grain_size()
         self._load_inflow_timeseries()
+        self._load_downstream_boundary()
         return self
+
+    def _check_discretisation(self):
+        if self.discretisation.chainage_min >= self.discretisation.chainage_max:
+            raise ValueError("chainage_min must be less than chainage_max")
 
     def _check_cross_sections(self):
         if self.model.type == "flume" and self.cross_sections.wallrf is None:
@@ -280,3 +333,14 @@ class GrateConfig(GrateBase):
                     value=val,
                 )
             )
+
+    def _load_downstream_boundary(self):
+        b = self.downstream_boundary
+        val = b.value
+        if b.type == "ts":
+            val = pd.read_csv(val, index_col=0, parse_dates=True)["flow"].sort_index()
+        self._processed_downstream_boundary = RuntimeDownstreamBoundary(
+            ordinate=b.ordinate,
+            type=b.type,
+            value=val,
+        )

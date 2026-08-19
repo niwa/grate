@@ -535,6 +535,10 @@ def replace_section_headers(lines: list[str], mappings: dict, sep: str) -> list[
     return result
 
 
+def convert_legacy_wrong_section(kv) -> dict:
+    kv["discretisation"]["max_dc"] = kv["simulation_time"].pop("max_dx")
+
+
 def parse_gin(fname: pathlib.Path) -> dict:
     """Return new config given old gin file.
 
@@ -579,6 +583,8 @@ def parse_gin(fname: pathlib.Path) -> dict:
                     state = "expect section name"
                     continue
                 parse_section_line(section, line, kv, fname.parent)
+
+    convert_legacy_wrong_section(kv)
 
     # parse grain sizes
     assert len(kv.setdefault("grain_size_profiles", "")) > 0, (
