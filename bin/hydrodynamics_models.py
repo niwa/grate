@@ -45,7 +45,7 @@ class HydroDynamicModel:
         """
         if h is None:
             h = self.h[c]
-        return self._channel.area(h, c)
+        return self._channel.area(c, h)
 
     def u(self, t: pd.Timestamp, c: int, h: float | None = None):
         """The mean velocity, ie Q/A"""

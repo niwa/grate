@@ -16,7 +16,7 @@ class Header(GrateBase):
 
 
 class Model(GrateBase):
-    type: str
+    type: typing.Literal["flume", "river", "braided_channel"]
 
 
 class SimulationTime(GrateBase):
