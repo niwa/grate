@@ -114,7 +114,7 @@ class HydroDynamicModel:
         lastchain = len(self.cs) - 1
         tv = self._cfg._processed_downstream_boundary.value_at(t)
         if "elevation" in tv:
-            return tv["value"] - self._channel.active_layer_elevation(lastchain)
+            return tv["value"] - self._channel.bed_elevation(lastchain)
         if "depth" in tv:
             return tv["value"]
         if "normal" in tv:
@@ -137,15 +137,15 @@ class QuasiSteadyModel(HydroDynamicModel):
     def initialize(self, t: pd.Timestamp):
         """Set h to initial value."""
         # get the chain values from channel so we know lengths
-        # FIXME, just starting 1m of water above active layer for now
+        # FIXME, just starting 1m of water depth
         self.h = np.ones(len(self.cs))
 
         # if the downstream boundary condition is normal, grab the hinit which
-        # is an elevation (need to
+        # is an elevation (need to subtract off
         tv = self._cfg._processed_downstream_boundary.value_at(t)
         if "normal" in tv:
             self.h[-1] = tv["normal"]["hinit"]
-            self.h[-1] -= self._channel.active_layer_elevation(len(self.cs) - 1)
+            self.h[-1] -= self._channel.bed_elevation(len(self.cs) - 1)
 
     def Q(self, t: pd.Timestamp, c: int):
         """Return flow at point along river
