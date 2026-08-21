@@ -57,9 +57,9 @@ class HydroDynamicModel:
         """Grain roughness"""
         return self._channel.ng(c)
 
-    def nf(self, c: int):
+    def nf(self, c: int, h: float):
         """Form roughness"""
-        return self._channel.nf(c)
+        return self._channel.nf(c, h)
 
     def conveyance(self, c: int, h: float | None = None):
         """K conveyance
@@ -77,7 +77,7 @@ class HydroDynamicModel:
         A = self.A(c, h)
         P = self.P(c, h)
         R = A / P
-        return A * R ** (2 / 3) / (self.ng(c) + self.nf(c))
+        return A * R ** (2 / 3) / (self.ng(c) + self.nf(c, h))
 
     def Sf(self, t: pd.Timestamp, c: int, h: float | None = None):
         """Return friction slope, ie. Q abs(Q) / K^2"""
@@ -114,7 +114,7 @@ class HydroDynamicModel:
         lastchain = len(self.cs) - 1
         tv = self._cfg._processed_downstream_boundary.value_at(t)
         if "elevation" in tv:
-            return tv["value"] - self._channel.bed_elevation(lastchain)
+            return tv["value"] - self._channel.bed_level(lastchain)
         if "depth" in tv:
             return tv["value"]
         if "normal" in tv:
@@ -145,7 +145,7 @@ class QuasiSteadyModel(HydroDynamicModel):
         tv = self._cfg._processed_downstream_boundary.value_at(t)
         if "normal" in tv:
             self.h[-1] = tv["normal"]["hinit"]
-            self.h[-1] -= self._channel.bed_elevation(len(self.cs) - 1)
+            self.h[-1] -= self._channel.bed_level(len(self.cs) - 1)
 
     def Q(self, t: pd.Timestamp, c: int):
         """Return flow at point along river

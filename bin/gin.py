@@ -67,11 +67,13 @@ class Discretisation(GrateBase):
         return length / num
 
 
-class CrossSectionProfiles(GrateBase):
+class CrossSectionProfile(GrateBase):
     chainage: p.StrictFloat
     topoid: str
     river_name: str
-    formrf: p.StrictFloat | None = None
+    formrf: p.StrictFloat | None = (
+        None  # override default roughness, can * by relrf in csv
+    )
     bankd90: p.StrictFloat | None = None
     active_layer_group: p.StrictInt | None = None
     storage_layer_group: p.StrictInt | None = None
@@ -82,9 +84,9 @@ class CrossSectionProfiles(GrateBase):
 
 
 class CrossSections(GrateBase):
-    formrf: p.StrictFloat
-    wallrf: p.StrictFloat | None = None
-    profiles: list[CrossSectionProfiles]
+    formrf: p.StrictFloat  # default form roughness
+    wallrf: p.StrictFloat | None = None  # vertical wall roughness for Flume
+    profiles: list[CrossSectionProfile]
 
 
 class InflowBoundaryTS(GrateBase):
