@@ -10,27 +10,35 @@ from gin import GrateConfig
 
 
 class CrossSection:
-    """Currently just the x/y points across cross-section profile"""
+    """A loaded CrossSectionProfile, includes metadata, xy points, derived props"""
 
     def __init__(self, xs: GrateConfig.CrossSectionProfile, default_formrf, wallrf):
-        self._from_points(
-            xs,
-            pd.read_csv(xs.profile),
-            xs.formrf if xs.formrf is not None else default_formrf,
-            wallrf,
-        )
+        self.chainage = xs.chainage
+        self.topoid = xs.topoid
+        self.river_name = xs.river_name
 
-    def _from_points(self, xs: GrateConfig.CrossSectionProfile, df, formrf, wallrf):
-        self._xs = xs
-        self._formrf = formrf
-        self._wallrf = wallrf
+        self.formrf = xs.formrf if xs.formrf is not None else default_formrf
+        self.wallrf = wallrf
+
+        self.bankd90 = xs.bankd90
+        self.active_layer_group = xs.active_layer_group
+        self.storage_layer_group = xs.storage_layer_group
+        self.bedrock_rl = xs.bedrock_rl
+        self.qsfact = xs.qsfact
+        self.lsf = xs.lsf
+
+        self.df = pd.read_csv(xs.profile)
+        self._set_points(self.df)
+
+    def _set_points(self, df):
+        """Set profile points and calculate derived properties."""
+        self.df = df
 
         # get roughness in for each segment in the profile
-        self.df = df
         if "relrf" in self.df.columns:
-            self.df["roughness"] = self.df["relrf"].fillna(1) * self._formrf
+            self.df["roughness"] = self.df["relrf"].fillna(1) * self.formrf
         else:
-            self.df["roughness"] = self._formrf
+            self.df["roughness"] = self.formrf
 
         # break into left, channel and right
         self.left, self.channel, self.right = self._split_pts_into_three(self.df)
@@ -38,13 +46,54 @@ class CrossSection:
         self.mean_bed_level = self._calculate_mean_bed_level()
         self.bed_level = self._calculate_bed_level()
 
-    def shifted(self, dy: float) -> "CrossSection":
-        xs = self._xs.model_copy(deep=True)
-        df = self.df.copy()
-        df["y"] += dy
-        me = CrossSection.__new__(CrossSection)
-        me._from_points(xs, df, self._formrf, self._wallrf)
-        return me
+    def interpolate(self, other: "CrossSection", f: float) -> "CrossSection":
+        """Return an approximate interpolation between two cross sections.
+
+        Geometry is taken from the closer cross section and shifted to the
+        interpolated mean bed level. Numeric cross-section properties are
+        linearly interpolated.
+        """
+
+        def interp(a, b, f):
+            if a is None or b is None:
+                return None
+            return a + f * (b - a)
+
+        assert 0 <= f <= 1, f"Interpolation fraction must be between 0 and 1, got {f}"
+
+        cs = self.__class__.__new__(self.__class__)
+
+        cs.chainage = self.chainage + f * (other.chainage - self.chainage)
+
+        # These aren't really interpolated.
+        cs.topoid = self.topoid if f < 0.5 else other.topoid
+        cs.river_name = self.river_name if f < 0.5 else other.river_name
+
+        cs.formrf = interp(self.formrf, other.formrf, f)
+        cs.wallrf = interp(self.wallrf, other.wallrf, f)
+        cs.bankd90 = interp(self.bankd90, other.bankd90, f)
+        cs.bedrock_rl = interp(self.bedrock_rl, other.bedrock_rl, f)
+        cs.qsfact = interp(self.qsfact, other.qsfact, f)
+        cs.lsf = interp(self._lsf, other.lsf, f)
+
+        cs.active_layer_group = (
+            self.active_layer_group if f < 0.5 else other.active_layer_group
+        )
+        cs.storage_layer_group = (
+            self.storage_layer_group if f < 0.5 else other.storage_layer_group
+        )
+
+        # Interpolate the mean bed level, then use the nearer geometry.
+        target_bed = self.mean_bed_level + f * (
+            other.mean_bed_level - self.mean_bed_level
+        )
+
+        source = self if f < 0.5 else other
+        df = source.df.copy()
+        df["y"] += target_bed - source.mean_bed_level
+        cs._set_points(df)
+
+        return cs
 
     def get_formrf(self):
         return self._formrf
@@ -103,99 +152,75 @@ class CrossSection:
         """The minimum bed level."""
         return self.channel["y"].min()
 
-    def B(self, h: float):
-        """Return water surface width for depth h above the channel bed."""
+    def _wetted_segments(self, h: float):
+        """Yield roughness, perimeter, width and area for each wetted segment."""
         water_level = self.bed_level + h
 
         x = self.df["x"].to_numpy()
         y = self.df["y"].to_numpy()
+        r = self.df["roughness"].to_numpy()
 
-        width = 0.0
-
-        for x0, x1, y0, y1 in zip(x[:-1], x[1:], y[:-1], y[1:]):
+        for x0, x1, y0, y1, rough in zip(x[:-1], x[1:], y[:-1], y[1:], r[1:]):
             # seg is above
             if y0 > water_level and y1 > water_level:
                 continue
 
             # seg below water
             if y0 <= water_level and y1 <= water_level:
-                width += x1 - x0
-                continue
+                peri = math.hypot(x1 - x0, y1 - y0)
+                width = x1 - x0
+                area = width * (water_level - (y0 + y1) / 2)
 
             # seg crosses
-            f = (water_level - y0) / (y1 - y0)
-            xc = x0 + f * (x1 - x0)
-
-            if y0 <= water_level:
-                # heading down
-                width += xc - x0
             else:
-                width += x1 - xc
+                f = (water_level - y0) / (y1 - y0)
+                xc = x0 + f * (x1 - x0)
 
-        return width
+                if y0 <= water_level:
+                    # heading up
+                    dx = xc - x0
+                    dy = water_level - y0
+                else:
+                    # heading down
+                    dx = x1 - xc
+                    dy = water_level - y1
+
+                peri = math.hypot(dx, dy)
+                width = dx
+                area = 0.5 * dx * dy
+
+            yield rough, peri, width, area
+
+    def B(self, h: float):
+        """Return water surface width for given depth."""
+        return sum(w for _, _, w, _ in self._wetted_segments(h))
 
     def P(self, h: float):
-        """Wetted perimeter for given water level"""
-        water_level = self.bed_level + h
-
-        x = self.df["x"].to_numpy()
-        y = self.df["y"].to_numpy()
-
-        peri = 0.0
-
-        for x0, x1, y0, y1 in zip(x[:-1], x[1:], y[:-1], y[1:]):
-            # seg is above
-            if y0 > water_level and y1 > water_level:
-                continue
-
-            # seg below water
-            if y0 <= water_level and y1 <= water_level:
-                peri += np.hypot(x1 - x0, y1 - y0)
-                continue
-
-            # seg crosses
-            f = (water_level - y0) / (y1 - y0)
-            xc = x0 + f * (x1 - x0)
-
-            if y0 <= water_level:
-                # heading down
-                peri += math.hypot(xc - x0, water_level - y0)
-            else:
-                peri += math.hypot(x1 - xc, y1 - water_level)
-
-        return peri
+        """Wetted perimeter for given water level."""
+        return sum(p for _, p, _, _ in self._wetted_segments(h))
 
     def area(self, h: float):
-        """Area of water below this height"""
-        water_level = self.bed_level + h
+        """Area of water below this height."""
+        return sum(a for _, _, _, a in self._wetted_segments(h))
 
-        x = self.df["x"].to_numpy()
-        y = self.df["y"].to_numpy()
+    def nf(self, h: float):
+        """Return form roughness for the wetted cross-section.
 
-        a = 0.0
+        formrf * sum_k (r_k * p_k) / P
 
-        for x0, x1, y0, y1 in zip(x[:-1], x[1:], y[:-1], y[1:]):
-            # seg is above
-            if y0 > water_level and y1 > water_level:
-                continue
+        formrf is the default form roughness of cross-section
+        rk and pk are relative roughness and wetted perimeter
+        P is the wetted perimeter
 
-            # seg below water
-            if y0 <= water_level and y1 <= water_level:
-                a += (x1 - x0) * (water_level - (y0 + y1) / 2)
-                continue
+        """
+        peri = 0.0
+        weighted_p = 0.0
 
-            # seg crosses
-            f = (water_level - y0) / (y1 - y0)
-            xc = x0 + f * (x1 - x0)
+        for rough, p, _, _ in self._wetted_segments(h):
+            peri += p
+            weighted_p += rough * p
 
-            if y0 <= water_level:
-                # heading up
-                a += 0.5 * (xc - x0) * (water_level - y0)
-            else:
-                # heading down
-                a += 0.5 * (x1 - xc) * (water_level - y1)
-
-        return a
+        return self.formrf * weighted_p / peri
 
 
 class Channel:
@@ -256,11 +281,7 @@ class Channel:
                 raise ValueError(f"No cross sections surrounding chainage {c}")
 
             f = (c - c0) / (c1 - c0)
-            target_bed = p0.mean_bed_level + f * (p1.mean_bed_level - p0.mean_bed_level)
-
-            # Use whichever source cross section is closer.
-            p = p0 if f < 0.5 else p1
-            ixss.append(p.shifted(target_bed - p.mean_bed_level))
+            ixss.append(p0.interpolate(p1, f))
 
         return ixss
 
@@ -285,7 +306,7 @@ class Channel:
 
     def nf(self, c: int, h: float):
         """Form roughness"""
-        raise NotImplementedError(f"nf({c}, {h})")
+        return self.xss[c].nf(h)
 
     def area(self, c: int, h: float):
         """Return area of water between bed and h"""
@@ -341,9 +362,9 @@ class Flume(Channel):
         -------------------------------
             width + 2h
         """
-        p = self.xss[c]
-        B = p.B(h)
-        return (p.get_formrf() * B + 2 * p.get_wallrf() * h) / (B + 2 * h)
+        xs = self.xss[c]
+        B = xs.B(h)
+        return (xs.get_formrf() * B + 2 * xs.get_wallrf() * h) / (B + 2 * h)
 
 
 class River(Channel):

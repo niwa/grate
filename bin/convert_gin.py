@@ -447,6 +447,8 @@ def parse_grain_size_profiles(kv):
     ngrp = cfg["ngrp"]
     ngsz = cfg["ngsz"]
     nlith = cfg["nlith"]
+    abrasion = cfg["abrasion"]
+    sediment = cfg["sediment"]
 
     # there should be ngsz+1 grain size rows, and nzgs*nlith lith rows
     assert ngsz * (nlith + 1) + 1 == len(cfg["datarows"]), (
@@ -467,6 +469,8 @@ def parse_grain_size_profiles(kv):
     kv["grain_size_profiles"]["num_profiles"] = ngrp
     kv["grain_size_profiles"]["num_bins"] = ngsz
     kv["grain_size_profiles"]["num_lith"] = nlith
+    kv["grain_size_profiles"]["abrasion_coeffs"] = abrasion
+    kv["grain_size_profiles"]["sediment_densities"] = sediment
     kv["grain_size_profiles"]["grain_size_cfds"] = grows
     if nlith > 1:
         kv["grain_size_profiles"]["lithfractions"] = lrows

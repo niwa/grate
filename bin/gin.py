@@ -245,6 +245,8 @@ class GrainSizeProfiles(GrateBase):
     num_profiles: p.StrictInt
     num_bins: p.StrictInt
     num_lith: p.StrictInt
+    abrasion_coeffs: list[p.StrictFloat]
+    sediment_densities: list[p.StrictFloat]
     grain_size_cfds: list[list[p.StrictFloat]]
     lithfractions: list[list[p.StrictFloat]] | None = []
 
@@ -267,7 +269,7 @@ class GrateConfig(GrateBase):
     _processed_inflow: list[RuntimeInflowBoundary] = p.PrivateAttr(default_factory=list)
     downstream_boundary: DownstreamBoundary
     _processed_downstream_boundary: RuntimeDownstreamBoundary = p.PrivateAttr(
-        defaut=None
+        default=None
     )
     sediment_boundary: list[SedimentBoundary]
 
