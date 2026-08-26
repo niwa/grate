@@ -1,7 +1,9 @@
 import math
 import numpy as np
 import pandas as pd
-from gin import GrateConfig
+from gin import GrateConfig, CrossSectionProfile, GrainSizeProfiles
+from layers import LayerStack
+from hydrodynamics_models import HydroDynamicModel
 
 # p = Profile(df)
 # p.B(10 - p.bed_level)
@@ -12,8 +14,16 @@ from gin import GrateConfig
 class CrossSection:
     """A loaded CrossSectionProfile, includes metadata, xy points, derived props"""
 
-    def __init__(self, xs: GrateConfig.CrossSectionProfile, default_formrf, wallrf):
+    def __init__(
+        self,
+        xs: CrossSectionProfile,
+        gs: GrainSizeProfiles,
+        hydro: HydroDynamicModel,
+        default_formrf,
+        wallrf,
+    ):
         self.chainage = xs.chainage
+        self.chainidx = None  # this will get filled in when interped
         self.topoid = xs.topoid
         self.river_name = xs.river_name
 
@@ -21,14 +31,14 @@ class CrossSection:
         self.wallrf = wallrf
 
         self.bankd90 = xs.bankd90
-        self.active_layer_group = xs.active_layer_group
-        self.storage_layer_group = xs.storage_layer_group
         self.bedrock_rl = xs.bedrock_rl
         self.qsfact = xs.qsfact
         self.lsf = xs.lsf
 
         self.df = pd.read_csv(xs.profile)
         self._set_points(self.df)
+
+        self.layers = LayerStack(self.chainidx, xs, gs, hydro)
 
     def _set_points(self, df):
         """Set profile points and calculate derived properties."""
@@ -46,12 +56,26 @@ class CrossSection:
         self.mean_bed_level = self._calculate_mean_bed_level()
         self.bed_level = self._calculate_bed_level()
 
-    def interpolate(self, other: "CrossSection", f: float) -> "CrossSection":
+    def interpolate(
+        self, other: "CrossSection", f: float, chainidx: int
+    ) -> "CrossSection":
         """Return an approximate interpolation between two cross sections.
 
         Geometry is taken from the closer cross section and shifted to the
-        interpolated mean bed level. Numeric cross-section properties are
-        linearly interpolated.
+        interpolated mean bed level. Numeric properties adn sediment-layer
+        properties linearly interpolated.
+
+        Parameters
+        ----------
+        other: CrossSection
+            Other cross section to interpolate with
+
+        f: float
+            interpolation proportion 0 to 1.  0 means self, 1 means other
+
+        chainidx: int
+            chain index to assign to the interpolant
+
         """
 
         def interp(a, b, f):
@@ -74,14 +98,7 @@ class CrossSection:
         cs.bankd90 = interp(self.bankd90, other.bankd90, f)
         cs.bedrock_rl = interp(self.bedrock_rl, other.bedrock_rl, f)
         cs.qsfact = interp(self.qsfact, other.qsfact, f)
-        cs.lsf = interp(self._lsf, other.lsf, f)
-
-        cs.active_layer_group = (
-            self.active_layer_group if f < 0.5 else other.active_layer_group
-        )
-        cs.storage_layer_group = (
-            self.storage_layer_group if f < 0.5 else other.storage_layer_group
-        )
+        cs.lsf = interp(self.lsf, other.lsf, f)
 
         # Interpolate the mean bed level, then use the nearer geometry.
         target_bed = self.mean_bed_level + f * (
@@ -92,6 +109,8 @@ class CrossSection:
         df = source.df.copy()
         df["y"] += target_bed - source.mean_bed_level
         cs._set_points(df)
+        cs.layers = source.layers.interpolate(other.layers, f)
+        cs.layers.chainidx = chainidx
 
         return cs
 
@@ -238,8 +257,8 @@ class Channel:
         d = self._cfg.discretisation
         return np.arange(d.chainage_min, d.chainage_max + self.dc / 2, self.dc)
 
-    def _get_cross_sections(self):
-        """Load the cross sections"""
+    def _get_cross_sections(self) -> dict:
+        """Return chainage point to CrossSection at that point"""
         xss = {}
 
         formrf = self._cfg.cross_sections.formrf
@@ -247,7 +266,7 @@ class Channel:
 
         for xs in self._cfg.cross_sections.profiles:
             c = xs.chainage
-            xss[c] = CrossSection(xs, formrf, wallrf)
+            xss[c] = CrossSection(xs, self._cfg, formrf, wallrf)
 
         # check min/max chainage
         assert min(xss.keys()) <= self.cs[0], (
@@ -259,29 +278,30 @@ class Channel:
         return xss
 
     def _get_interpolated_cross_sections(self):
-        """Interpolate cross section profiles onto our chainage points"""
+        """Return a list of CrossSection at self.cs"""
         xss = self._get_cross_sections()
         xs_chainpts = sorted(xss)
 
         ixss = []
 
-        for c in self.cs:
+        for i, cpt in enumerate(self.cs):
             # Exact cross section
-            if c in xss:
-                ixss.append(xss[c])
+            if cpt in xss:
+                xss[cpt].chainidx = i
+                ixss.append(xss[cpt])
                 continue
 
             # Find surrounding cross sections
             for c0, c1 in zip(xs_chainpts[:-1], xs_chainpts[1:]):
-                if c0 <= c <= c1:
+                if c0 <= cpt <= c1:
                     p0 = xss[c0]
                     p1 = xss[c1]
                     break
             else:
-                raise ValueError(f"No cross sections surrounding chainage {c}")
+                raise ValueError(f"No cross sections surrounding chainage {cpt}")
 
-            f = (c - c0) / (c1 - c0)
-            ixss.append(p0.interpolate(p1, f))
+            f = (cpt - c0) / (c1 - c0)
+            ixss.append(p0.interpolate(p1, f, i))
 
         return ixss
 

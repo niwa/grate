@@ -75,8 +75,8 @@ class CrossSectionProfile(GrateBase):
         None  # override default roughness, can * by relrf in csv
     )
     bankd90: p.StrictFloat | None = None
-    active_layer_group: p.StrictInt | None = None
-    storage_layer_group: p.StrictInt | None = None
+    active_layer_group: p.StrictInt = p.Field(ge=1)
+    storage_layer_group: p.StrictInt = p.Field(ge=1)
     bedrock_rl: p.StrictFloat | None = None
     qsfact: p.StrictFloat | None = None
     lsf: p.StrictFloat | None = None
@@ -299,6 +299,17 @@ class GrateConfig(GrateBase):
         elif self.model.type != "flume" and self.cross_sections.wallrf is not None:
             raise ValueError("cross_sections.wallrf is only valid for flume models")
 
+        nprof = self.grain_size_profiles.num_profiles
+        for cs in self.cross_sections:
+            if cs.active_layer_group > nprof:
+                raise ValueError(
+                    f"cross_sections.active_layer_group ({cs.active_layer_group}) must be <= number of grain size profiles ({nprof})"
+                )
+            if cs.storage_layer_group > nprof:
+                raise ValueError(
+                    f"cross_sections.storage_layer_group ({cs.storage_layer_group}) must be <= number of grain size profiles ({nprof})"
+                )
+
     def _check_grain_size(self):
         nprof = self.grain_size_profiles.num_profiles
         nbins = self.grain_size_profiles.num_bins
@@ -321,6 +332,14 @@ class GrateConfig(GrateBase):
                 raise ValueError(
                     f"grain_size_profiles: {nprof=} but number of columns is {len(row)}"
                 )
+        if len(self.grain_size_profiles.abrasion_coeffs) != nlith:
+            raise ValueError(
+                f"grain_size_profiles: {len(self.grain_size_profiles.abrasion_coeffs)=} != {nlith=}"
+            )
+        if len(self.grain_size_profiles.sediment_densities) != nlith:
+            raise ValueError(
+                f"grain_size_profiles: {len(self.grain_size_profiles.sediment_densities)=} != {nlith=}"
+            )
 
     def _load_inflow_timeseries(self):
         self._processed_inflow.clear()
