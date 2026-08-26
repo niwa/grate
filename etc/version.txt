@@ -1,2 +1,2 @@
-Version: 1.0.25
-Commit date: 2026-08-25T03:16:28+00:00
+Version: 1.0.26
+Commit date: 2026-08-26T20:40:28+00:00
