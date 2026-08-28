@@ -1,10 +1,12 @@
 import math
 import datetime as dt
+import numpy as np
 import pandas as pd
 import pathlib
 import typing
 import pydantic as p
 from dataclasses import dataclass
+from grainprofile import get_grain_props
 
 
 class GrateBase(p.BaseModel):
@@ -219,15 +221,54 @@ class SedimentBoundaryTS(GrateBase):
     fname: pathlib.Path
 
 
-class SedimentBoundaryRC(GrateBase):
-    type: typing.Literal["rc"]
-    ordinate: p.StrictFloat
+# class SedimentBoundaryRC(GrateBase):
+#     type: typing.Literal["rc"]
+#     ordinate: p.StrictFloat
 
 
 SedimentBoundary = typing.Annotated[
-    typing.Union[SedimentBoundaryRC, SedimentBoundaryTS, SedimentBoundaryConst],
+    # typing.Union[SedimentBoundaryRC, SedimentBoundaryTS, SedimentBoundaryConst],
+    typing.Union[SedimentBoundaryTS, SedimentBoundaryConst],
     p.Field(discriminator="type"),
 ]
+
+
+@dataclass
+class RuntimeSedimentBoundary(RuntimeInflowBoundary):
+    ordinate: float
+    type: str
+    nbins: int
+    nlith: int
+    value: np.ndarray | pd.DataFrame
+
+    def unravel(self, x):
+        return np.asarray(x).reshape(self.nbins, self.nlith)
+
+    def value_at(self, t: pd.Timestamp) -> np.ndarray:
+        """Return nbins x nlith volume/s sediment transport"""
+
+        if self.type == "const":
+            return self.value
+
+        s = self.value
+        if t in s.index:
+            return self.unravel(s.loc[t])
+
+        # have to interpolate
+        pos = s.index.searchsorted(t)
+
+        # bounds check
+        if pos == 0:
+            return self.unravel(s.iloc[0])
+        if pos == len(s):
+            return self.unravel(s.iloc[-1])
+
+        t0 = s.index[pos - 1]
+        t1 = s.index[pos]
+        v0 = s.iloc[pos - 1]
+        v1 = s.iloc[pos]
+        fraction = (t - t0) / (t1 - t0)
+        return self.unravel(v0 + fraction * (v1 - v0))
 
 
 class SedimentExtraction(GrateBase):
@@ -272,6 +313,9 @@ class GrateConfig(GrateBase):
         default=None
     )
     sediment_boundary: list[SedimentBoundary]
+    processed_sediment_boundary: list[RuntimeSedimentBoundary] = p.PrivateAttr(
+        default_factory=list
+    )
 
     sediment_extraction: list[SedimentExtraction] = []
     sediment_ripping: list[SedimentRipping] = []
@@ -287,6 +331,8 @@ class GrateConfig(GrateBase):
         self._check_grain_size()
         self._load_inflow_timeseries()
         self._load_downstream_boundary()
+        self._load_sediment_boundary_timeseries()
+        self._check_sediment_boundary()
         return self
 
     def _check_discretisation(self):
@@ -366,4 +412,51 @@ class GrateConfig(GrateBase):
             ordinate=b.ordinate,
             type=b.type,
             value=val,
+        )
+
+    def _load_sediment_boundary_timeseries(self):
+        self.processed_sediment_boundary.clear()
+        nbins = self.grain_size_profiles.num_bins
+        nlith = self.grain_size_profiles.num_lith
+        densities = self.grain_size_profiles.sediment_densities
+
+        for boundary in self.sediment_boundary:
+            # matrix nbins x nlith
+            jliprops = get_grain_props(boundary.group - 1)
+
+            # sum the columns to get weights
+            rho = np.average(densities, weights=jliprops.sum(axis=0))
+
+            # val is kg/s
+            val = boundary.value
+            if boundary.type == "ts":
+                val = pd.read_csv(val, index_col=0, parse_dates=True)[
+                    "flow"
+                ].sort_index()
+                val *= boundary.scale
+                # make each row be val * jliprops unravelled
+                values = val.to_numpy()[:, None] * jliprops.ravel()[None, :]
+                val = pd.DataFrame(values, index=val.index)
+            else:
+                val *= jliprops
+
+            # divide by density to get val in volume/s
+            val /= rho
+
+            self.processed_sediment_boundary.append(
+                RuntimeSedimentBoundary(
+                    ordinate=boundary.ordinate,
+                    type=boundary.type,
+                    nbins=nbins,
+                    nlith=nlith,
+                    value=val,
+                )
+            )
+
+    def _check_sediment_boundary(self):
+        cm = self.discretisation.chainage_min
+        if any(sb.ordinate == cm for sb in self.sediment_boundary):
+            return
+        raise ValueError(
+            f"Must be atleast one sediment_boundary condition with ordinate {cm}"
         )

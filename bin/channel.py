@@ -1,7 +1,7 @@
 import math
 import numpy as np
 import pandas as pd
-from gin import GrateConfig, CrossSectionProfile, GrainSizeProfiles
+from gin import GrateConfig, CrossSectionProfile
 from layers import LayerStack
 from hydrodynamics_models import HydroDynamicModel
 
@@ -17,7 +17,7 @@ class CrossSection:
     def __init__(
         self,
         xs: CrossSectionProfile,
-        gs: GrainSizeProfiles,
+        cfg: GrateConfig,
         hydro: HydroDynamicModel,
         default_formrf,
         wallrf,
@@ -38,7 +38,7 @@ class CrossSection:
         self.df = pd.read_csv(xs.profile)
         self._set_points(self.df)
 
-        self.layers = LayerStack(self.chainidx, xs, gs, hydro)
+        self.layers = LayerStack(self.chainidx, xs, cfg, hydro)
 
     def _set_points(self, df):
         """Set profile points and calculate derived properties."""
@@ -109,8 +109,7 @@ class CrossSection:
         df = source.df.copy()
         df["y"] += target_bed - source.mean_bed_level
         cs._set_points(df)
-        cs.layers = source.layers.interpolate(other.layers, f)
-        cs.layers.chainidx = chainidx
+        cs.layers = source.layers.interpolate(other.layers, f, chainidx)
 
         return cs
 
@@ -210,7 +209,11 @@ class CrossSection:
 
             yield rough, peri, width, area
 
-    def B(self, h: float):
+    def Bchan(self):
+        """Return channel width"""
+        return self.channel.iloc[-1].x - self.channel.iloc[0].x
+
+    def Bwet(self, h: float):
         """Return water surface width for given depth."""
         return sum(w for _, _, w, _ in self._wetted_segments(h))
 
@@ -241,6 +244,25 @@ class CrossSection:
 
         return self.formrf * weighted_p / peri
 
+    def Qb_jli(self, t: pd.Timestamp):
+        """Return bed material transport rate 2darray
+
+        Parameters
+        ----------
+        t: pd.Timestamp
+            Time
+
+        Returns
+        -------
+        np.array:
+            nbins x nlith 2d array.  (j, li) element is bed transport for li
+            lith group and j proportion size
+        """
+        return self.layers.qb_jli(t) * self.Bwet()
+
+    def update_alayer_proportions(self, df: np.ndarray):
+        self.layers.acfd += df
+
 
 class Channel:
     """Flume, river, braided channel"""
@@ -248,6 +270,7 @@ class Channel:
     def __init__(self, cfg: GrateConfig):
         self._cfg = cfg
         self.dc = self._cfg.discretisation.dc
+        self.poro = self._cfg.Morphological.poro
         self.cs = self._chainpts()
         self.nc = len(self.cs)
         self.xss = self._get_interpolated_cross_sections()
@@ -305,6 +328,9 @@ class Channel:
 
         return ixss
 
+    def _get_sediment_bc(self):
+        """Return"""
+
     def beta(self):
         """Momentum correction factor"""
         return 1
@@ -354,13 +380,39 @@ class Channel:
         )
         return (self.mean_bed_level(c) - self.mean_bed_level(c + 1)) / self.dc
 
-    def B(self, c: int, h: float):
+    def Bwet(self, c: int, h: float):
         """Water surface width"""
-        return self.xss[c].B(h)
+        return self.xss[c].Bwet(h)
 
     def bed_level(self, c: int):
         """Return deepest part of the cross-section"""
         return self.xss[c].bed_level
+
+    def propogate_sediment(self, t: pd.Timestamp):
+
+        for c in range(1, self.nc):
+            # nbins x nlith rate of sediment coming in from boundary
+            bdy_sediment_rate = sum(
+                sb.value_at(t)
+                for sb in self._cfg.processed_sediment_boundary
+                if self.cs[c - 1] <= sb.ordinate < self.cs[c]
+            )
+
+            up_Qb_jli = self.xss[c - 1].Qb_jli(t) + bdy_sediment_rate
+            my_Qb_jli = self.xss[c].Qb_jli(t)
+
+            fact = self.dt / self.dc / (1 - self.poro) / self.xss[c].Bchan()
+            dy = (up_Qb_jli.sum() - my_Qb_jli.sum()) * fact
+            self.xss[c].channel["y"] += dy
+
+            p = my_Qb_jli / my_Qb_jli.sum()
+            df = (
+                (up_Qb_jli - my_Qb_jli) * fact - self.xss[c].f_interface(dy > 0, p) * dy
+            ) / self._cfg.morphological.la
+
+            self.xss[c].update_alayer_proportions(df)
+
+            # FIXME, change storage layer f_jli
 
 
 class Flume(Channel):

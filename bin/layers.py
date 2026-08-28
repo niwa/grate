@@ -2,10 +2,11 @@ import math
 import numpy as np
 import scipy
 import pandas as pd
-from gin import CrossSectionProfile, GrainSizeProfiles
+from gin import CrossSectionProfile, GrateConfig
 from hydrodynamics_models import HydroDynamicModel
+from grainprofile import get_representative_grain_sizes, get_grain_props
 
-KAPPA = 0.4
+KAPPA = 0.4  #  Von Kalmans constant
 GRAVITY = 9.81
 WATER_DENSITY = 1000
 
@@ -15,80 +16,42 @@ class LayerStack:
     section"""
 
     def __init__(
-        self, xs: CrossSectionProfile, gs: GrainSizeProfiles, hydro: HydroDynamicModel
+        self, xs: CrossSectionProfile, cfg: GrateConfig, hydro: HydroDynamicModel
     ):
         self.chainage = xs.chainage
         self.chainidx = None  # will be sorted when interpolated
+        gs = cfg.grain_size_profiles
+        self.chi = cfg.morphology.chi
         self.nlith = gs.nlith
 
         # nlith in length
         self.abrasion_coeffs = gs.abrasion_coeffs
-        self.sediment_densities = gs.sediment_densities
+        self.sediment_densities = np.array(gs.sediment_densities)
 
-        # number of bins in length
-        self.rgsizes = self._get_representative_grain_sizes(gs.grain_size_cfds)
+        # nbins in length
+        self.rgsizes = get_representative_grain_sizes(gs.grain_size_cfds)
 
-        # nlith in length of nbins
-        self.acfd = self._get_props(gs.grain_size_cfds, xs.active_layer_group - 1)
-        self.scfd = self._get_props(gs.grain_size_cfds, xs.storage_layer_group - 1)
+        # nbins x nlith
+        self.acfd = get_grain_props(
+            xs.active_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
+        )
+        self.scfd = get_grain_props(
+            xs.storage_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
+        )
 
         self.hydro = hydro
 
         # phi, representative bin value (Dj) in mm
         # 2** (( log(bot) + log(top) ) / 2)
 
-    def _get_represenative_grain_sizes(self, cfds):
-        """Return the representative grain sizes
-
-        2^( (log(bot) + log(top))/2 )
-        """
-        # get first column, the sizes from cfds.
-        p = [i[0] for i in cfds]
-        return [
-            2 ** ((math.log(bot) + math.log(top)) / 2)
-            for bot, top in zip(p[:-1], p[1:])
-        ]
-
-    def _get_props(self, cfds, pid: int):
-        """Return the fractions or proportions for given profile index.
-
-        Parameters
-        ----------
-        pid: int
-            The grain profile 1-based index
-
-        Returns
-        -------
-        list of length nlith:
-            For each lithology we have a list each element is the fraction of
-            grains of this representative size.
-        """
-        # this is the cummulative frequency for this profile
-        cfd = [i[pid] for i in cfds]
-
-        # convert to a proportion fraction
-        total = cfd[-1]
-        prop = [cfd[0] / total, *[(b - a) / total for a, b in zip(cfd[:-1], cfd[1:])]]
-
-        if (nlith := self.nlith) == 1:
-            return [prop]
-
-        # need the pid'th column of lithfractions
-        lfracs = [lf[pid] for lf in self.grain_size_profiles.lithfractions]
-
-        # number of bins x nlith
-        weights = np.array(lfracs).reshape(-1, nlith)
-        weights = weights / weights.sum(axis=1, keepdims=1)
-
-        return (np.expand_dims(prop, 1) * weights).T.tolist()
-
-    def interpolate(self, other: "LayerStack", f: float) -> "LayerStack":
+    def interpolate(self, other: "LayerStack", f: float, chainidx: int) -> "LayerStack":
         """Return a new layer stack that is interped between me and other"""
 
         result = object.__new__(LayerStack)
 
         result.chainage = self.chainage + f * (other.chainage - self.chainage)
-        result.c = "FIXME"
+        result.chainidx = chainidx
+        result.chi = self.chi
         result.nlith = self.nlith
         result.rgsizes = self.rgsizes
         result.hydro = self.hydro
@@ -96,7 +59,7 @@ class LayerStack:
         for k in ["abrasion_coeffs", "sediment_densities", "acfd", "scfd"]:
             m = np.array(getattr(self, k))
             o = np.array(getattr(other, k))
-            setattr(result, k, (m + f * (o - m)).tolist())
+            setattr(result, k, m + f * (o - m))
 
         return result
 
@@ -141,56 +104,125 @@ class LayerStack:
         ustar = self.grain_shear_velocity(t)
         return WATER_DENSITY * ustar**2
 
-    def grain_proportion_size(self, j: int, li: int):
-        """Proportion of grain of size j"""
-        return self.acfd[li][j]
+    def d90(self):
+        """90th percentile of grain sizes in active layer."""
+        return self._grain_size_percentile(0.9)
 
-    def dj(self, j: int):
-        """Representative diameter of jth grain size in active layer."""
-        return self.rgsizes[j]
-
-    def sediment_density(self, li: int):
-        """Density of sediment lith type li"""
-        # cfg.grain_size_profiles.sediment_densities
-        return self.sediment_densities[li]
+    def dsm(self):
+        """Median of grain sizes in active layer."""
+        return self._grain_size_percentile(0.5)
 
     def sand_fraction(self):
         """Fraction of grains with size < 2mm in active layer"""
-        # FIXME: need the grain sizes in active layer
-        pass
+        return self._grain_proportion_small_than(0.2)
 
-    def d90(self, li: int):
-        """90th percentile of grain sizes in active layer for lith li."""
-        # FIXME, maybe not per lith
-        return self._percentile(0.9, self.acdf[li])
+    def _grain_size_percentile(self, x: float):
+        """Grain size in active layer over all lith at this percentile
 
-    def dsm(self, li: int):
-        """Median of grain sizes in active layer."""
-        # FIXME, maybe not per lith
-        return self._percentile(0.5, self.acdf[li])
+        Parameters
+        ----------
+        x: float
+            Percentile between 0 and 1
 
-    def qb_jc(self, t: pd.Timestamp, j: int):
+        Returns
+        -------
+        float:
+            The representative grain size over all lith at this percentile
+        """
+
+        assert 0 <= x <= 1
+
+        # sum over lith groups and get cumulative sum
+        prop = self.acfd.sum(axis=1)
+        cf = np.cumsum(prop)
+
+        # interpolate x in cf to find where we are in phi = -log(rgsizes)
+        phi = np.interp(x, cf, -np.log(self.rgsizes))
+
+        return np.exp(-phi)
+
+    def _grain_proportion_small_than(self, x: float):
+        """Proportion of grains (over all lith) smaller than given size
+
+        Parameters
+        ----------
+        x: float
+            Grain size in mm
+
+        Returns
+        -------
+        float:
+            Proportion of grains small than x
+        """
+
+        assert 0 < x
+
+        # sum over lith groups and get cumulative sum
+        prop = self.acfd.sum(axis=1)
+        cf = np.cumsum(prop)
+
+        # interpolate -log(x) in -log(rgsizes) to find where we are cf
+        # we must reverse since np.interp expects x-coord to increase
+        return np.interp(-np.log(x), -np.log(self.rgsizes)[::-1], cf[::-1])
+
+    def qb_jli(self, t: pd.Timestamp):
         """Volumetric transport rate per unit width
 
         Wilcock & Crowe (2003), equation 9.33, qb_jc
+
+        Returns
+        -------
+        np.array:
+            nbins x nlith array.  (j, li) element is transport rate for
+            jth proportion and li lith group.
         """
 
+        rgsizes = np.expand_dims(self.rgsizes, 1)  # (nbins, 1)
+
         Fs = self.sand_fraction()
-        phirm = 0.021 + 0.015 * math.exp(-20 * Fs)
-        s = self.sediment_density(j) / WATER_DENSITY
+        phirm = 0.021 + 0.015 * np.exp(-20 * Fs)
+        s = self.sediment_densities / WATER_DENSITY  # (nlith, )
         dsm = self.dsm()
-        dj = self.dj(j)
         tau_rm = phirm * (s - 1) * WATER_DENSITY * GRAVITY * dsm
-        b = 0.67 / (1 + math.exp(1.5 - dj / dsm))
-        tau_rj = tau_rm * (dj / dsm) ** b
-        phi = self.grain_stress(t) / tau_rj
-        Fj = self.grain_proportion_size(j)
+        b = 0.67 / (1 + np.exp(1.5 - rgsizes / dsm))  # (nbins, 1 )
+        tau_rj = tau_rm * (rgsizes / dsm) ** b  # (nbins, nlith)
+        phi = self.grain_stress(t) / tau_rj  # (nbins, nlith)
+        Fj = self.acfd  # (nbins, nlith)
         ustar = self.grain_shear_velocity(t)
 
-        q = Fj * ustar**3 / (s - 1) / GRAVITY
-        if phi < 1.35:
-            q *= 0.002 * phi**7.5
-        else:
-            q *= 14 * (1 - 0.894 / math.sqrt(phi)) ** 4.5
+        q = Fj * ustar**3 / (s - 1) / GRAVITY  # (nbins, nlith)
+
+        q *= np.where(
+            phi < 1.35,
+            0.002 * phi**7.5,
+            14 * (1 - 0.894 / np.sqrt(phi)) ** 4.5,
+        )
 
         return q
+
+    def f_interface(self, aggrading: bool, p: float):
+        """Interface distribution, how much is moving INTO active layer.
+
+        Parameters
+        ----------
+        aggrading: bool
+            If delta y > 0
+
+        p: float
+            Qb_jli / Qb for this cross section.  Sediment transfer in bed
+        """
+
+        if aggrading:
+            return self.chi * self.acdf + (1 - self.chi) * p
+        else:
+            return self.scdf
+
+    def update_grains_in_alayer(self, deltaf_jli: np.array):
+        """Update proportion grain sizes
+
+        Parameters
+        ----------
+        deltaf_jli: np.array
+            nbins x nlith change in grain proportions
+        """
+        self.acfd += deltaf_jli

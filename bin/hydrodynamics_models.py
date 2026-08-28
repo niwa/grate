@@ -94,11 +94,11 @@ class HydroDynamicModel:
         """Bed slope at c"""
         return self._channel.S0(c)
 
-    def B(self, c: int, h: float | None = None):
+    def Bwet(self, c: int, h: float | None = None):
         """Water surface width"""
         if h is None:
             h = self.h[c]
-        return self._channel.B(c, h)
+        return self._channel.Bwet(c, h)
 
     def R(self, c: int, h: float | None = None):
         """Hydraulic radius A/P"""
@@ -195,7 +195,7 @@ class QuasiSteadyModel(HydroDynamicModel):
 
         sf = (self.Sf(t, c, h) + self.Sf(t, c + 1)) / 2
         g = 9.8
-        B = self.B(c, h)
+        B = self.Bwet(c, h)
         A = self.A(c, h)
         fprime = (
             1
