@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 from gin import GrateConfig, CrossSectionProfile
 from layers import LayerStack
-from hydrodynamics_models import HydroDynamicModel
 
 # p = Profile(df)
 # p.B(10 - p.bed_level)
@@ -18,7 +17,6 @@ class CrossSection:
         self,
         xs: CrossSectionProfile,
         cfg: GrateConfig,
-        hydro: HydroDynamicModel,
         default_formrf,
         wallrf,
     ):
@@ -38,7 +36,7 @@ class CrossSection:
         self.df = pd.read_csv(xs.profile)
         self._set_points(self.df)
 
-        self.layers = LayerStack(self.chainidx, xs, cfg, hydro)
+        self.layers = LayerStack(xs, cfg)
 
     def _set_points(self, df):
         """Set profile points and calculate derived properties."""
@@ -114,10 +112,10 @@ class CrossSection:
         return cs
 
     def get_formrf(self):
-        return self._formrf
+        return self.formrf
 
     def get_wallrf(self):
-        return self._wallrf
+        return self.wallrf
 
     def _split_pts_into_three(self, df):
         """Return three dataframes, left, channel and right bank"""
@@ -242,9 +240,10 @@ class CrossSection:
             peri += p
             weighted_p += rough * p
 
-        return self.formrf * weighted_p / peri
+        # don't need to multiply by formrf since roughness already done that
+        return weighted_p / peri
 
-    def Qb_jli(self, t: pd.Timestamp):
+    def Qb_jli(self, t: pd.Timestamp, hydro):
         """Return bed material transport rate 2darray
 
         Parameters
@@ -258,7 +257,7 @@ class CrossSection:
             nbins x nlith 2d array.  (j, li) element is bed transport for li
             lith group and j proportion size
         """
-        return self.layers.qb_jli(t) * self.Bwet()
+        return self.layers.qb_jli(t, hydro) * self.Bwet(hydro.h[self.chainidx])
 
     def update_alayer_proportions(self, df: np.ndarray):
         self.layers.acfd += df
@@ -269,8 +268,9 @@ class Channel:
 
     def __init__(self, cfg: GrateConfig):
         self._cfg = cfg
-        self.dc = self._cfg.discretisation.dc
-        self.poro = self._cfg.Morphological.poro
+        self.dt = cfg.simulation_time.dt
+        self.dc = cfg.discretisation.dc
+        self.poro = cfg.morphological.poro
         self.cs = self._chainpts()
         self.nc = len(self.cs)
         self.xss = self._get_interpolated_cross_sections()
@@ -388,18 +388,18 @@ class Channel:
         """Return deepest part of the cross-section"""
         return self.xss[c].bed_level
 
-    def propogate_sediment(self, t: pd.Timestamp):
+    def propogate_sediment(self, t: pd.Timestamp, hydro):
 
         for c in range(1, self.nc):
             # nbins x nlith rate of sediment coming in from boundary
             bdy_sediment_rate = sum(
                 sb.value_at(t)
-                for sb in self._cfg.processed_sediment_boundary
+                for sb in self._cfg._processed_sediment_boundary
                 if self.cs[c - 1] <= sb.ordinate < self.cs[c]
             )
 
-            up_Qb_jli = self.xss[c - 1].Qb_jli(t) + bdy_sediment_rate
-            my_Qb_jli = self.xss[c].Qb_jli(t)
+            up_Qb_jli = self.xss[c - 1].Qb_jli(t, hydro) + bdy_sediment_rate
+            my_Qb_jli = self.xss[c].Qb_jli(t, hydro)
 
             fact = self.dt / self.dc / (1 - self.poro) / self.xss[c].Bchan()
             dy = (up_Qb_jli.sum() - my_Qb_jli.sum()) * fact
@@ -435,7 +435,7 @@ class Flume(Channel):
             width + 2h
         """
         xs = self.xss[c]
-        B = xs.B(h)
+        B = xs.Bwet(h)
         return (xs.get_formrf() * B + 2 * xs.get_wallrf() * h) / (B + 2 * h)
 
 

@@ -87,11 +87,11 @@ def get_grain_props(pid: int, cfds: list[list], lithtab: list[list]):
         size.
     """
     # this is the cummulative frequency for this profile
-    cfd = [i[pid] for i in cfds]
+    cfd = [i[pid + 1] for i in cfds]
 
     # convert to a proportion fraction
     total = cfd[-1]
-    prop = [cfd[0] / total, *[(b - a) / total for a, b in zip(cfd[:-1], cfd[1:])]]
+    prop = [(b - a) / total for a, b in zip(cfd[:-1], cfd[1:])]
     nbins = len(prop)
 
     # get the number of lith

@@ -1,7 +1,7 @@
 import math
 import numpy as np
 import pandas as pd
-import scipy
+import scipy.optimize
 from gin import GrateConfig
 from channel import Channel
 
@@ -119,7 +119,7 @@ class HydroDynamicModel:
             return tv["value"]
         if "normal" in tv:
             slope = tv["normal"]["slope"]
-            Q = self.Q(lastchain, t)
+            Q = self.Q(t, lastchain)
 
             def f(h):
                 K = self.conveyance(lastchain, h)
@@ -180,10 +180,7 @@ class QuasiSteadyModel(HydroDynamicModel):
         g = 9.8
         f = (
             h
-            + (
-                self.beta(c) * self.u(t, c, h) ** 2
-                - self.beta(c + 1) * self.u(t, c + 1) ** 2
-            )
+            + (self.beta() * self.u(t, c, h) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
             / (2 * g)
             - self.h[c + 1]
             + (self.S0(c) - sf) * self.dc
@@ -199,7 +196,7 @@ class QuasiSteadyModel(HydroDynamicModel):
         A = self.A(c, h)
         fprime = (
             1
-            - (self.beta(c) * B * self.u(t, c, h) ** 2) / (g * A)
+            - (self.beta() * B * self.u(t, c, h) ** 2) / (g * A)
             + sf * (B + 0.667 / self.R(c, h)) * self.dc / A
         )
         return fprime
@@ -210,7 +207,7 @@ class QuasiSteadyModel(HydroDynamicModel):
         self.h[-1] = self.get_ds_h(t)
 
         # use h[i+1] to calculate h[i]
-        for i in range(len(self.cs) - 2, 0, -1):
+        for i in range(len(self.cs) - 2, -1, -1):
 
             def f(h):
                 return self.f57(t, i, h)

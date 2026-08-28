@@ -1,9 +1,8 @@
 import math
 import numpy as np
-import scipy
+import scipy.optimize
 import pandas as pd
 from gin import CrossSectionProfile, GrateConfig
-from hydrodynamics_models import HydroDynamicModel
 from grainprofile import get_representative_grain_sizes, get_grain_props
 
 KAPPA = 0.4  #  Von Kalmans constant
@@ -15,13 +14,11 @@ class LayerStack:
     """Holds active and storage layer grain profiles for a given cross
     section"""
 
-    def __init__(
-        self, xs: CrossSectionProfile, cfg: GrateConfig, hydro: HydroDynamicModel
-    ):
+    def __init__(self, xs: CrossSectionProfile, cfg: GrateConfig):
         self.chainage = xs.chainage
         self.chainidx = None  # will be sorted when interpolated
         gs = cfg.grain_size_profiles
-        self.chi = cfg.morphology.chi
+        self.chi = cfg.morphological.chi
         self.nlith = gs.nlith
 
         # nlith in length
@@ -39,8 +36,6 @@ class LayerStack:
             xs.storage_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
         )
 
-        self.hydro = hydro
-
         # phi, representative bin value (Dj) in mm
         # 2** (( log(bot) + log(top) ) / 2)
 
@@ -54,7 +49,6 @@ class LayerStack:
         result.chi = self.chi
         result.nlith = self.nlith
         result.rgsizes = self.rgsizes
-        result.hydro = self.hydro
 
         for k in ["abrasion_coeffs", "sediment_densities", "acfd", "scfd"]:
             m = np.array(getattr(self, k))
@@ -63,7 +57,7 @@ class LayerStack:
 
         return result
 
-    def grain_shear_velocity(self, t: pd.Timestamp):
+    def grain_shear_velocity(self, t: pd.Timestamp, hydro):
         """Return grain shear velocity, u^*
 
         From equation 10.3
@@ -79,10 +73,10 @@ class LayerStack:
         This is used in the Wilcock & Crowe (2003) formula for qb_jc
         """
 
-        u = self.hydro.u(t, self.chainidx)
-        Sf = self.hydro.Sf(t, self.chainidx)
+        u = hydro.u(t, self.chainidx)
+        Sf = hydro.Sf(t, self.chainidx)
         ks = self.d90()
-        h = self.hydro.h[self.chainidx]
+        h = hydro.h[self.chainidx]
 
         def f(ustar):
             hs = ustar**2 / GRAVITY / Sf
@@ -94,14 +88,14 @@ class LayerStack:
             raise ValueError(f"Can't solve grain_shear_velocity. {info=}")
         return ustar
 
-    def grain_stress(self, t: pd.Timestamp):
+    def grain_stress(self, t: pd.Timestamp, hydro):
         """Graint stress tau_g
 
         From equation 10.5
 
         rho grain_shear_velocity^2
         """
-        ustar = self.grain_shear_velocity(t)
+        ustar = self.grain_shear_velocity(t, hydro)
         return WATER_DENSITY * ustar**2
 
     def d90(self):
@@ -114,7 +108,7 @@ class LayerStack:
 
     def sand_fraction(self):
         """Fraction of grains with size < 2mm in active layer"""
-        return self._grain_proportion_small_than(0.2)
+        return self._grain_proportion_small_than(2)
 
     def _grain_size_percentile(self, x: float):
         """Grain size in active layer over all lith at this percentile
@@ -165,7 +159,7 @@ class LayerStack:
         # we must reverse since np.interp expects x-coord to increase
         return np.interp(-np.log(x), -np.log(self.rgsizes)[::-1], cf[::-1])
 
-    def qb_jli(self, t: pd.Timestamp):
+    def qb_jli(self, t: pd.Timestamp, hydro):
         """Volumetric transport rate per unit width
 
         Wilcock & Crowe (2003), equation 9.33, qb_jc
@@ -186,9 +180,9 @@ class LayerStack:
         tau_rm = phirm * (s - 1) * WATER_DENSITY * GRAVITY * dsm
         b = 0.67 / (1 + np.exp(1.5 - rgsizes / dsm))  # (nbins, 1 )
         tau_rj = tau_rm * (rgsizes / dsm) ** b  # (nbins, nlith)
-        phi = self.grain_stress(t) / tau_rj  # (nbins, nlith)
+        phi = self.grain_stress(t, hydro) / tau_rj  # (nbins, nlith)
         Fj = self.acfd  # (nbins, nlith)
-        ustar = self.grain_shear_velocity(t)
+        ustar = self.grain_shear_velocity(t, hydro)
 
         q = Fj * ustar**3 / (s - 1) / GRAVITY  # (nbins, nlith)
 
@@ -213,9 +207,9 @@ class LayerStack:
         """
 
         if aggrading:
-            return self.chi * self.acdf + (1 - self.chi) * p
+            return self.chi * self.acfd + (1 - self.chi) * p
         else:
-            return self.scdf
+            return self.scfd
 
     def update_grains_in_alayer(self, deltaf_jli: np.array):
         """Update proportion grain sizes

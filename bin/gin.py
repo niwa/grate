@@ -27,7 +27,7 @@ class SimulationTime(GrateBase):
     num_cycles: p.StrictInt
     max_dt_qs: p.StrictFloat
     max_dt_fd: p.StrictFloat
-    cdt: p.StrictFloat
+    dt: p.StrictFloat
     max_dq_over_dt: p.StrictFloat
 
 
@@ -313,7 +313,7 @@ class GrateConfig(GrateBase):
         default=None
     )
     sediment_boundary: list[SedimentBoundary]
-    processed_sediment_boundary: list[RuntimeSedimentBoundary] = p.PrivateAttr(
+    _processed_sediment_boundary: list[RuntimeSedimentBoundary] = p.PrivateAttr(
         default_factory=list
     )
 
@@ -346,7 +346,7 @@ class GrateConfig(GrateBase):
             raise ValueError("cross_sections.wallrf is only valid for flume models")
 
         nprof = self.grain_size_profiles.num_profiles
-        for cs in self.cross_sections:
+        for cs in self.cross_sections.profiles:
             if cs.active_layer_group > nprof:
                 raise ValueError(
                     f"cross_sections.active_layer_group ({cs.active_layer_group}) must be <= number of grain size profiles ({nprof})"
@@ -415,14 +415,17 @@ class GrateConfig(GrateBase):
         )
 
     def _load_sediment_boundary_timeseries(self):
-        self.processed_sediment_boundary.clear()
-        nbins = self.grain_size_profiles.num_bins
-        nlith = self.grain_size_profiles.num_lith
-        densities = self.grain_size_profiles.sediment_densities
+        self._processed_sediment_boundary.clear()
+        gs = self.grain_size_profiles
+        nbins = gs.num_bins
+        nlith = gs.num_lith
+        densities = gs.sediment_densities
 
         for boundary in self.sediment_boundary:
             # matrix nbins x nlith
-            jliprops = get_grain_props(boundary.group - 1)
+            jliprops = get_grain_props(
+                boundary.group - 1, gs.grain_size_cfds, gs.lithfractions
+            )
 
             # sum the columns to get weights
             rho = np.average(densities, weights=jliprops.sum(axis=0))
@@ -443,7 +446,7 @@ class GrateConfig(GrateBase):
             # divide by density to get val in volume/s
             val /= rho
 
-            self.processed_sediment_boundary.append(
+            self._processed_sediment_boundary.append(
                 RuntimeSedimentBoundary(
                     ordinate=boundary.ordinate,
                     type=boundary.type,

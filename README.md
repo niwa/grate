@@ -26,6 +26,9 @@ directory, and update your path.  Open a terminal and run `grate --help`
 
 3. Run using `python bin/grate.py <input file>`
 
+### Testing
+
+pytest bin/tests/ -v
 
 ## Installer
 
