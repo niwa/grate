@@ -38,6 +38,11 @@ class CrossSection:
 
         self.layers = LayerStack(xs, cfg)
 
+    def __str__(self):
+        return (
+            f"CrossSection at chainage={self.chainage} (idx={self.chainidx})\n{self.df}"
+        )
+
     def _set_points(self, df):
         """Set profile points and calculate derived properties."""
         self.df = df
@@ -86,6 +91,7 @@ class CrossSection:
         cs = self.__class__.__new__(self.__class__)
 
         cs.chainage = self.chainage + f * (other.chainage - self.chainage)
+        cs.chainidx = chainidx
 
         # These aren't really interpolated.
         cs.topoid = self.topoid if f < 0.5 else other.topoid
@@ -116,6 +122,12 @@ class CrossSection:
 
     def get_wallrf(self):
         return self.wallrf
+
+    def d90(self):
+        return self.layers.d90()
+
+    def f_interface(self, aggrading: bool, p: float):
+        return self.layers.f_interface(aggrading, p)
 
     def _split_pts_into_three(self, df):
         """Return three dataframes, left, channel and right bank"""
@@ -268,12 +280,30 @@ class Channel:
 
     def __init__(self, cfg: GrateConfig):
         self._cfg = cfg
-        self.dt = cfg.simulation_time.dt
         self.dc = cfg.discretisation.dc
         self.poro = cfg.morphological.poro
         self.cs = self._chainpts()
         self.nc = len(self.cs)
         self.xss = self._get_interpolated_cross_sections()
+        self._init_dt()
+
+    def _init_dt(self):
+        # start out at max dt which the cfg has set under dt
+        self.dt = self.max_dt = self._cfg.max_dt
+
+        # start out 10% of max rate
+        self.cdt = self._cfg.simulation_time.cdt
+        self.max_deta_over_dt = 0.1 * self.cdt / self.dt
+
+    def _set_next_dt(self):
+        self.max_deta_over_dt = max(1e-10, self.max_deta_over_dt)
+        self.dt = min(self.cdt / self.max_deta_over_dt, self.max_dt)
+
+    def get_dt(self):
+        return self.dt
+
+    def __str__(self):
+        return f"Channel with cross sections:\n{'\n'.join(str(s) for s in self.xss)}"
 
     def _chainpts(self):
         """Return chain points"""
@@ -311,6 +341,7 @@ class Channel:
             # Exact cross section
             if cpt in xss:
                 xss[cpt].chainidx = i
+                xss[cpt].layers.chainidx = i
                 ixss.append(xss[cpt])
                 continue
 
@@ -344,7 +375,7 @@ class Channel:
         floodplain use bank d90 from config file if specified else surface
         layer
         """
-        raise NotImplementedError(f"d90({c})")
+        return self.xss[c].d90()
 
     def ng(self, c: int):
         """Grain roughness at given chainage"""
@@ -390,6 +421,9 @@ class Channel:
 
     def propogate_sediment(self, t: pd.Timestamp, hydro):
 
+        # keep track of dy's to update max_deta_over_dt
+        dys = []
+
         for c in range(1, self.nc):
             # nbins x nlith rate of sediment coming in from boundary
             bdy_sediment_rate = sum(
@@ -404,6 +438,7 @@ class Channel:
             fact = self.dt / self.dc / (1 - self.poro) / self.xss[c].Bchan()
             dy = (up_Qb_jli.sum() - my_Qb_jli.sum()) * fact
             self.xss[c].channel["y"] += dy
+            dys.append(dy)
 
             p = my_Qb_jli / my_Qb_jli.sum()
             df = (
@@ -413,6 +448,9 @@ class Channel:
             self.xss[c].update_alayer_proportions(df)
 
             # FIXME, change storage layer f_jli
+
+        self.max_deta_over_dt = max(dys)
+        self._set_next_dt()
 
 
 class Flume(Channel):

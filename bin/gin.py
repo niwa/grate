@@ -18,7 +18,8 @@ class Header(GrateBase):
 
 
 class Model(GrateBase):
-    type: typing.Literal["flume", "river", "braided_channel"]
+    channel_type: typing.Literal["flume", "river", "braided_channel"]
+    hydro_model_type: typing.Literal["quasi_ss", "dynamic"]
 
 
 class SimulationTime(GrateBase):
@@ -27,7 +28,7 @@ class SimulationTime(GrateBase):
     num_cycles: p.StrictInt
     max_dt_qs: p.StrictFloat
     max_dt_fd: p.StrictFloat
-    dt: p.StrictFloat
+    cdt: p.StrictFloat
     max_dq_over_dt: p.StrictFloat
 
 
@@ -142,7 +143,6 @@ class RuntimeInflowBoundary:
 
 @dataclass
 class RuntimeDownstreamBoundary:
-    ordinate: float
     type: str
     value: float | pd.Series
 
@@ -289,7 +289,15 @@ class GrainSizeProfiles(GrateBase):
     abrasion_coeffs: list[p.StrictFloat]
     sediment_densities: list[p.StrictFloat]
     grain_size_cfds: list[list[p.StrictFloat]]
-    lithfractions: list[list[p.StrictFloat]] | None = []
+    lithfractions: list[list[p.StrictFloat]] | None = None
+
+    @p.model_validator(mode="after")
+    def post_validate(self):
+        if self.num_lith == 1 and not self.lithfractions:
+            self.lithfractions = [
+                [100.0] * self.num_profiles for _ in range(self.num_bins)
+            ]
+        return self
 
 
 class PrintOptions(GrateBase):
@@ -324,6 +332,14 @@ class GrateConfig(GrateBase):
 
     print: PrintOptions
 
+    # start out with maximum dt
+    @p.computed_field
+    @property
+    def max_dt(self) -> float:
+        if self.model.hydro_model_type == "quasi_ss":
+            return self.simulation_time.max_dt_qs
+        return self.simulation_time.max_dt_fd
+
     @p.model_validator(mode="after")
     def post_validate(self):
         self._check_discretisation()
@@ -340,9 +356,12 @@ class GrateConfig(GrateBase):
             raise ValueError("chainage_min must be less than chainage_max")
 
     def _check_cross_sections(self):
-        if self.model.type == "flume" and self.cross_sections.wallrf is None:
+        if self.model.channel_type == "flume" and self.cross_sections.wallrf is None:
             raise ValueError("cross_sections.wallrf is required for flume models")
-        elif self.model.type != "flume" and self.cross_sections.wallrf is not None:
+        elif (
+            self.model.channel_type != "flume"
+            and self.cross_sections.wallrf is not None
+        ):
             raise ValueError("cross_sections.wallrf is only valid for flume models")
 
         nprof = self.grain_size_profiles.num_profiles
@@ -369,14 +388,14 @@ class GrateConfig(GrateBase):
                 raise ValueError(
                     f"grain_size_profiles: {nprof=} but number of columns is {len(row)}"
                 )
-        if nlith > 1 and nbins * nlith != len(self.grain_size_profiles.lithfractions):
+        if nbins * nlith != len(self.grain_size_profiles.lithfractions):
             raise ValueError(
                 f"grain_size_profiles: {nbins=} {nlith=} but number of lines is {len(self.grain_size_profiles.lithfractions)}"
             )
         for row in self.grain_size_profiles.lithfractions:
-            if nprof + 1 != len(row):
+            if nprof != len(row):
                 raise ValueError(
-                    f"grain_size_profiles: {nprof=} but number of columns is {len(row)}"
+                    f"grain_size_profiles: {nprof=} but number of columns is {len(row)}.  NB lith table shouldnt have leading 1s"
                 )
         if len(self.grain_size_profiles.abrasion_coeffs) != nlith:
             raise ValueError(
@@ -409,7 +428,6 @@ class GrateConfig(GrateBase):
         if b.type == "ts":
             val = pd.read_csv(val, index_col=0, parse_dates=True)["flow"].sort_index()
         self._processed_downstream_boundary = RuntimeDownstreamBoundary(
-            ordinate=b.ordinate,
             type=b.type,
             value=val,
         )

@@ -40,7 +40,7 @@ OPTIONAL_SECTION_MAPPINGS = {
 }
 
 GIN_VALUE_MAPPINGS = {
-    ("model", "type"): {
+    ("model", "channel_type"): {
         "1": "flume",
         "2": "river",
         "4": "braided_channel",
@@ -53,7 +53,7 @@ KEYS_TO_IGNORE = ["VERSID"]
 def ykey(key: str) -> str:
     """Map gin key names to yaml key names"""
     return {
-        "MODELTYPE": "type",
+        "MODELTYPE": "channel_type",
         "TS": "start",
         "TE": "end",
         "NO_CYCLES": "num_cycles",
@@ -600,7 +600,7 @@ def parse_gin(fname: pathlib.Path) -> dict:
     assert "cross_sections" in kv and "xsectfile" in kv["cross_sections"]
     ifile = pathlib.Path(pathlib.PureWindowsPath(kv["cross_sections"]["xsectfile"]))
     print(f"Converting {ifile} to {ifile.with_suffix('.csv')}")
-    match kv["model"]["type"]:
+    match kv["model"]["channel_type"]:
         case "flume" | "river" | "braided_channel":
             parse_allmodels_xsectfile(fname.parent, ifile, kv)
         case _:

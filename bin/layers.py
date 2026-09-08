@@ -19,7 +19,7 @@ class LayerStack:
         self.chainidx = None  # will be sorted when interpolated
         gs = cfg.grain_size_profiles
         self.chi = cfg.morphological.chi
-        self.nlith = gs.nlith
+        self.nlith = gs.num_lith
 
         # nlith in length
         self.abrasion_coeffs = gs.abrasion_coeffs
@@ -38,6 +38,9 @@ class LayerStack:
 
         # phi, representative bin value (Dj) in mm
         # 2** (( log(bot) + log(top) ) / 2)
+
+    def __str__(self):
+        return f"Layer {self.chainage=} {self.chainidx=}"
 
     def interpolate(self, other: "LayerStack", f: float, chainidx: int) -> "LayerStack":
         """Return a new layer stack that is interped between me and other"""
@@ -83,6 +86,10 @@ class LayerStack:
             return ustar - u * KAPPA / math.log(11 * hs / ks)
 
         init = u * KAPPA / math.log(11 * h / ks)
+        print(f"GSV, {u=} {Sf=} {ks=} {h=} {init=}")
+        for i in range(1, 10):
+            print(i, f(i))
+
         ustar, info = scipy.optimize.newton(f, init, full_output=True)
         if not info.converged:
             raise ValueError(f"Can't solve grain_shear_velocity. {info=}")

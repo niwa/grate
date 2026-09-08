@@ -88,7 +88,6 @@ def get_grain_props(pid: int, cfds: list[list], lithtab: list[list]):
     """
     # this is the cummulative frequency for this profile
     cfd = [i[pid + 1] for i in cfds]
-
     # convert to a proportion fraction
     total = cfd[-1]
     prop = [(b - a) / total for a, b in zip(cfd[:-1], cfd[1:])]
@@ -98,6 +97,7 @@ def get_grain_props(pid: int, cfds: list[list], lithtab: list[list]):
     nlith = int(len(lithtab) / nbins)
     assert nlith * nbins == len(lithtab)
 
+    # get the number of lith
     if nlith == 1:
         return np.array(prop)[:, None]
 

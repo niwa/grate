@@ -71,11 +71,10 @@ match args.command:
     case "validate":
         with open(args.yaml) as f:
             cfg = GrateConfig.model_validate(yaml.safe_load(f))
-            print(cfg.header.runid)
 
     case "run":
         updates.version_check()
-        print(f"Should do something with {args.yaml}")
+        print(f"Running {args.yaml}")
 
     case _:
         p.print_help()

@@ -11,8 +11,8 @@ class HydroDynamicModel:
         self._cfg = cfg
         self._channel = chan
         self.dc = self._channel.dc
-        self.cs = self._channel.chainpts
-        self.initialize(self._cfg.SimulationTime.start)
+        self.cs = self._channel._chainpts()
+        self.initialize(self._cfg.simulation_time.start)
 
     def initialize(self, t: pd.Timestamp):
         """Set h to initial values."""
@@ -71,6 +71,8 @@ class HydroDynamicModel:
             R is A/P
             ng is grain roughness
             nf is form roughness
+
+        FIXME: we need to break this out into left bank, main channel, right bank
         """
         if h is None:
             h = self.h[c]
@@ -114,9 +116,9 @@ class HydroDynamicModel:
         lastchain = len(self.cs) - 1
         tv = self._cfg._processed_downstream_boundary.value_at(t)
         if "elevation" in tv:
-            return tv["value"] - self._channel.bed_level(lastchain)
+            return tv["elevation"] - self._channel.bed_level(lastchain)
         if "depth" in tv:
-            return tv["value"]
+            return tv["depth"]
         if "normal" in tv:
             slope = tv["normal"]["slope"]
             Q = self.Q(t, lastchain)
@@ -137,8 +139,8 @@ class QuasiSteadyModel(HydroDynamicModel):
     def initialize(self, t: pd.Timestamp):
         """Set h to initial value."""
         # get the chain values from channel so we know lengths
-        # FIXME, just starting 1m of water depth
-        self.h = np.ones(len(self.cs))
+        # FIXME, just starting 0.5m of water depth
+        self.h = np.ones(len(self.cs)) / 2
 
         # if the downstream boundary condition is normal, grab the hinit which
         # is an elevation (need to subtract off
