@@ -81,18 +81,37 @@ class LayerStack:
         ks = self.d90()
         h = hydro.h[self.chainidx]
 
+        last_x = None
+
+        def f_logged(x):
+            nonlocal last_x
+            last_x = x
+            return f(x)
+
         def f(ustar):
             hs = ustar**2 / GRAVITY / Sf
             return ustar - u * KAPPA / math.log(11 * hs / ks)
 
         init = u * KAPPA / math.log(11 * h / ks)
-        print(f"GSV, {u=} {Sf=} {ks=} {h=} {init=}")
-        for i in range(1, 10):
-            print(i, f(i))
+        # print(f"GSV, {u=} {Sf=} {ks=} {h=} {init=}")
 
-        ustar, info = scipy.optimize.newton(f, init, full_output=True)
+        # for i in np.arange(0.01, 2, step=0.1):
+        #     print(i, f(i))
+
+        try:
+            ustar, info = scipy.optimize.newton(f_logged, init, full_output=True)
+        except RuntimeError as e:
+            x = last_x
+            if x is not None:
+                for i in np.linspace(0.999 * x, 1.001 * x, 2000):
+                    print(i, f(i))
+                print(f"GSV, {u=} {Sf=} {ks=} {h=}")
+
+            raise ValueError(f"Can't solve grain_shear_velocity; last ustar={x}") from e
+
         if not info.converged:
             raise ValueError(f"Can't solve grain_shear_velocity. {info=}")
+
         return ustar
 
     def grain_stress(self, t: pd.Timestamp, hydro):
@@ -193,11 +212,21 @@ class LayerStack:
 
         q = Fj * ustar**3 / (s - 1) / GRAVITY  # (nbins, nlith)
 
-        q *= np.where(
-            phi < 1.35,
-            0.002 * phi**7.5,
-            14 * (1 - 0.894 / np.sqrt(phi)) ** 4.5,
-        )
+        # print(
+        #     f"gs={self.grain_stress(t, hydro)} {self.sediment_densities=}  {dsm=} {tau_rm=} tau_rj={tau_rj} phi={phi}"
+        # )
+
+        result = np.empty_like(phi)
+        mask = phi < 1.35
+        result[mask] = 0.002 * phi[mask] ** 7.5
+        result[~mask] = 14 * (1 - 0.894 / np.sqrt(phi[~mask])) ** 4.5
+
+        # q *= np.where(
+        #     phi < 1.35,
+        #     0.002 * phi**7.5,
+        #     14 * (1 - 0.894 / np.sqrt(phi)) ** 4.5,
+        # )
+        q *= result
 
         return q
 

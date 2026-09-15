@@ -448,7 +448,7 @@ def parse_grain_size_profiles(kv):
     ngsz = cfg["ngsz"]
     nlith = cfg["nlith"]
     abrasion = cfg["abrasion"]
-    sediment = cfg["sediment"]
+    sediment = cfg["sediment"] * 1000  # old gin format is in tons/m^3 we want kg/m^3
 
     # there should be ngsz+1 grain size rows, and nzgs*nlith lith rows
     assert ngsz * (nlith + 1) + 1 == len(cfg["datarows"]), (

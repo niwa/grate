@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import pandas as pd
+from enum import Enum
 from gin import GrateConfig, CrossSectionProfile
 from layers import LayerStack
 
@@ -8,6 +9,12 @@ from layers import LayerStack
 # p.B(10 - p.bed_level)
 # p.P(10 - p.bed_level)
 # p.area(9 - p.bed_level)
+
+
+class Loc(Enum):
+    LEFT = "left"
+    CHANNEL = "channel"
+    RIGHT = "right"
 
 
 class CrossSection:
@@ -123,8 +130,11 @@ class CrossSection:
     def get_wallrf(self):
         return self.wallrf
 
-    def d90(self):
-        return self.layers.d90()
+    def d90(self, loc: Loc):
+        if loc == Loc.CHANNEL:
+            return self.layers.d90()
+        else:
+            return self.bankd90
 
     def f_interface(self, aggrading: bool, p: float):
         return self.layers.f_interface(aggrading, p)
@@ -180,13 +190,22 @@ class CrossSection:
         """The minimum bed level."""
         return self.channel["y"].min()
 
-    def _wetted_segments(self, h: float):
+    def _wetted_segments(self, h: float, loc: Loc | None = None):
         """Yield roughness, perimeter, width and area for each wetted segment."""
         water_level = self.bed_level + h
 
-        x = self.df["x"].to_numpy()
-        y = self.df["y"].to_numpy()
-        r = self.df["roughness"].to_numpy()
+        df = {
+            Loc.LEFT: self.left,
+            Loc.CHANNEL: self.channel,
+            Loc.RIGHT: self.right,
+            None: self.df,
+        }[loc]
+
+        x = df["x"].to_numpy()
+        y = df["y"].to_numpy()
+        r = df["roughness"].to_numpy()
+
+        # print(f"wetted_seg h={h} loc={loc} df={df}")
 
         for x0, x1, y0, y1, rough in zip(x[:-1], x[1:], y[:-1], y[1:], r[1:]):
             # seg is above
@@ -227,15 +246,15 @@ class CrossSection:
         """Return water surface width for given depth."""
         return sum(w for _, _, w, _ in self._wetted_segments(h))
 
-    def P(self, h: float):
+    def P(self, h: float, loc: Loc | None = None):
         """Wetted perimeter for given water level."""
-        return sum(p for _, p, _, _ in self._wetted_segments(h))
+        return sum(p for _, p, _, _ in self._wetted_segments(h, loc))
 
-    def area(self, h: float):
+    def area(self, h: float, loc: Loc | None = None):
         """Area of water below this height."""
-        return sum(a for _, _, _, a in self._wetted_segments(h))
+        return sum(a for _, _, _, a in self._wetted_segments(h, loc))
 
-    def nf(self, h: float):
+    def nf(self, h: float, loc: Loc):
         """Return form roughness for the wetted cross-section.
 
         formrf * sum_k (r_k * p_k) / P
@@ -248,7 +267,7 @@ class CrossSection:
         peri = 0.0
         weighted_p = 0.0
 
-        for rough, p, _, _ in self._wetted_segments(h):
+        for rough, p, _, _ in self._wetted_segments(h, loc):
             peri += p
             weighted_p += rough * p
 
@@ -366,7 +385,7 @@ class Channel:
         """Momentum correction factor"""
         return 1
 
-    def d90(self, c: int):
+    def d90(self, c: int, loc: Loc):
         """90th percentile of the grain diameter.
 
         Referred to in Eq 8.4
@@ -375,23 +394,24 @@ class Channel:
         floodplain use bank d90 from config file if specified else surface
         layer
         """
-        return self.xss[c].d90()
+        return self.xss[c].d90(loc)
 
-    def ng(self, c: int):
+    def ng(self, c: int, loc: Loc):
         """Grain roughness at given chainage"""
-        return 0.044 * self.d90(c) ** (1 / 6)
+        return 0.044 * self.d90(c, loc) ** (1 / 6)
 
-    def nf(self, c: int, h: float):
+    def nf(self, c: int, h: float, loc: Loc):
         """Form roughness"""
-        return self.xss[c].nf(h)
+        return self.xss[c].nf(h, loc)
 
-    def area(self, c: int, h: float):
+    def area(self, c: int, h: float, loc: Loc | None = None):
         """Return area of water between bed and h"""
-        return self.xss[c].area(h)
+        # print(f"Doing area for c={c} h={h} loc={loc}")
+        return self.xss[c].area(h, loc)
 
-    def P(self, c: int, h: float):
+    def P(self, c: int, h: float, loc: Loc | None = None):
         """Wetted perimeter at chainage"""
-        return self.xss[c].P(h)
+        return self.xss[c].P(h, loc)
 
     def mean_bed_level(self, c: int):
         """Return mean bed level of profile at chainage c

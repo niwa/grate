@@ -28,10 +28,10 @@ def run_model(infile: pathlib.Path, debugfile: pathlib.Path):
 
     while t <= end:
         print(f"At time = {t}")
-        print("Updating water height")
+        # print("Updating water height")
         hmodel.update_height(t)
-        print(f"heights are {hmodel.h}")
-        print("Propogating sediment")
+        # print(f"heights are {hmodel.h}")
+        # print("Propogating sediment")
 
         if debugfile:
             times.append(t)

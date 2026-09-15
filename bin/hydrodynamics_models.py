@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import scipy.optimize
 from gin import GrateConfig
-from channel import Channel
+from channel import Channel, Loc
 
 
 class HydroDynamicModel:
@@ -28,69 +28,85 @@ class HydroDynamicModel:
         Parameters
         ----------
         c: int
-            Chainage point along river in units of dc
+            Chainage index along river in units of dc
 
         t: pd.Timestamp
             Time
         """
         raise NotImplementedError(f"Q({t}, {c})")
 
-    def A(self, c: int, h: float | None = None):
+    def A(self, c: int, h: float | None = None, loc: Loc | None = None):
         """The area of the water at c chainage
 
         Parameters
         ----------
         c: int
             Chainage point along river in units of dc
+
+        h: float
+            If None, then get the height from self.h, else calculate for this
+            height
+
+        loc: Loc
+            If None, get the total area, otherwise just in this Loc (left, main
+            channel, or right bank0
         """
         if h is None:
             h = self.h[c]
-        return self._channel.area(c, h)
+        return self._channel.area(c, h, loc)
 
     def u(self, t: pd.Timestamp, c: int, h: float | None = None):
         """The mean velocity, ie Q/A"""
         if h is None:
             h = self.h[c]
+        # print(f"hydromodels, Q({t}, {c}) = {self.Q(t, c)}, A({c}, {h}) = {self.A(c, h)}")
         return self.Q(t, c) / self.A(c, h)
 
-    def ng(self, c: int):
+    def ng(self, c: int, loc: Loc):
         """Grain roughness"""
-        return self._channel.ng(c)
+        return self._channel.ng(c, loc)
 
-    def nf(self, c: int, h: float):
+    def nf(self, c: int, h: float, loc: Loc):
         """Form roughness"""
-        return self._channel.nf(c, h)
+        return self._channel.nf(c, h, loc)
 
     def conveyance(self, c: int, h: float | None = None):
         """K conveyance
 
-        A * R^(2/3) / (ng + nf)
+        sum over left, main, right of
+            A * R^(2/3) / (ng + nf)
 
         where
             A is the area
             R is A/P
             ng is grain roughness
             nf is form roughness
-
-        FIXME: we need to break this out into left bank, main channel, right bank
         """
         if h is None:
             h = self.h[c]
-        A = self.A(c, h)
-        P = self.P(c, h)
-        R = A / P
-        return A * R ** (2 / 3) / (self.ng(c) + self.nf(c, h))
+
+        K = 0
+        for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT):
+            A = self.A(c, h, loc)
+            P = self.P(c, h, loc)
+            if P == 0:
+                # FIXME, check with Richard
+                continue
+            R = A / P
+            K += A * R ** (2 / 3) / (self.ng(c, loc) + self.nf(c, h, loc))
+
+        return K
 
     def Sf(self, t: pd.Timestamp, c: int, h: float | None = None):
         """Return friction slope, ie. Q abs(Q) / K^2"""
         Q = self.Q(t, c)
         return Q * abs(Q) / self.conveyance(c, h) ** 2
 
-    def P(self, c: int, h: float | None = None):
+    def P(self, c: int, h: float | None = None, loc: Loc | None = None):
         """Wetted perimeter at chainage"""
         if h is None:
             h = self.h[c]
-        return self._channel.P(c, h)
+        return self._channel.P(c, h, loc)
 
     def S0(self, c: int):
         """Bed slope at c"""
@@ -103,7 +119,7 @@ class HydroDynamicModel:
         return self._channel.Bwet(c, h)
 
     def R(self, c: int, h: float | None = None):
-        """Hydraulic radius A/P"""
+        """Hydraulic radius A/P over entire xsection"""
         if h is None:
             h = self.h[c]
         return self.A(c, h) / self.P(c, h)
@@ -225,7 +241,7 @@ class QuasiSteadyModel(HydroDynamicModel):
             )
             if not info.converged:
                 raise ValueError(f"Can't solve for new h at index {i}. {info=}")
-            print(f"At {i=} was {self.h[i]} now {h}")
+            # print(f"At {i=} was {self.h[i]} now {h}")
             self.h[i] = h
 
 
