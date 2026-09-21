@@ -11,6 +11,39 @@ from hydrodynamics_models import HydroDynamicModel
 from grainprofile import get_representative_grain_sizes
 
 
+def combine_netcdfs(idir: pathlib.Path) -> xr.Dataset:
+    """Combine netcdfs (they should have a single time) into one netcdf
+
+    Parameters
+    ----------
+    idir: pathlib.Path
+        Inside this directory should be a bunch of netcdf files, each one with
+        a single time value.  When the files are sorted they time should be
+        increasing.  Easiest way to do this is name the files 000.nc 001.nc etc
+
+    Returns
+    -------
+    xr.Dataset
+        A dataset containing the netcdf files combined over time dimension
+    """
+
+    files = sorted(idir.glob("*.nc"))
+    datasets = [xr.open_dataset(f) for f in files]
+    try:
+        ds = xr.concat(datasets, dim="time")
+        time0 = pd.Timestamp(ds.time.values[0])
+        ds.time.encoding.update(
+            {
+                "units": f"seconds since {time0:%Y-%m-%d}",
+                "dtype": "int64",
+            }
+        )
+    finally:
+        for d in datasets:
+            d.close()
+    return ds
+
+
 class Output:
     def __init__(self, cfg: GrateConfig, hmodel: HydroDynamicModel, chan: Channel):
         self._hmodel = hmodel
@@ -126,18 +159,5 @@ class Output:
 
     def write_final(self):
         """Combine steps into one file"""
-        files = sorted(self.idir.glob("*.nc"))
-        datasets = [xr.open_dataset(f) for f in files]
-        try:
-            ds = xr.concat(datasets, dim="time")
-            time0 = pd.Timestamp(ds.time.values[0])
-            ds.time.encoding.update(
-                {
-                    "units": f"seconds since {time0:%Y-%m-%d}",
-                    "dtype": "int64",
-                }
-            )
-            ds.to_netcdf(self._outfile)
-        finally:
-            for d in datasets:
-                d.close()
+        ds = combine_netcdfs(self.idir)
+        ds.to_netcdf(self._outfile)

@@ -11,6 +11,8 @@ import updates
 from convert_gin import parse_gin
 from gin import GrateConfig
 from simulate import run_model
+from output import combine_netcdfs
+from movie import make_movie
 
 # parse command line
 p = argparse.ArgumentParser(
@@ -47,8 +49,33 @@ Files referenced by gin file are not currently checked
     formatter_class=argparse.RawDescriptionHelpFormatter,
 )
 validate.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
+
 runmode = sub.add_parser("run", help="Run yaml model")
 runmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
+
+combinemode = sub.add_parser("combine", help="Combine single timestep netcdfs")
+combinemode.add_argument("idir", type=pathlib.Path, help="Input directory")
+combinemode.add_argument("fname", type=pathlib.Path, help="Output file.nc")
+
+moviemode = sub.add_parser("movie", help="Make movie from netcdf of a variable")
+moviemode.add_argument("infile", type=pathlib.Path, help="Input file.nc")
+moviemode.add_argument("var", help="Variable to plot, eg depth ")
+moviemode.add_argument("--xdim", default="chainage", help="x-axis dim, eg chainage")
+moviemode.add_argument(
+    "--sel",
+    action="append",
+    default=[],
+    metavar="DIM=INDEX",
+    help="Select an index for a dimension, eg --selection rgsize=10",
+)
+moviemode.add_argument(
+    "--dur",
+    type=float,
+    default=0.5,
+    help="Seconds to display each frame (default: 0.5)",
+)
+moviemode.add_argument("outfile", type=pathlib.Path, help="Output filename, eg out.mp4")
+
 args = p.parse_args()
 
 match args.command:
@@ -77,6 +104,24 @@ match args.command:
         updates.version_check()
         print(f"Running {args.yaml}")
         run_model(args.yaml)
+
+    case "combine":
+        updates.version_check()
+        ds = combine_netcdfs(args.idir)
+        print(f"Writing {args.fname}")
+        ds.to_netcdf(args.fname)
+
+    case "movie":
+        updates.version_check()
+        sels = {}
+        for kv in args.sel:
+            try:
+                dim, index = kv.split("=", 1)
+                sels[dim] = int(index)
+            except ValueError:
+                moviemode.error(f"Invalid selection {kv}; expected DIM=INT")
+        make_movie(args.infile, args.var, args.xdim, sels, args.dur, args.outfile)
+        print(f"Movie written to {args.outfile}")
 
     case _:
         p.print_help()
