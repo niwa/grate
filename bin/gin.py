@@ -300,9 +300,24 @@ class GrainSizeProfiles(GrateBase):
         return self
 
 
-class PrintOptions(GrateBase):
-    nprtf: p.StrictInt
-    outxsparms: p.StrictInt
+class OutputOptions(GrateBase):
+    frequency: p.StrictInt
+    idir: pathlib.Path | None = None
+    fname: pathlib.Path
+    variables: (
+        typing.Literal["all"]
+        | list[
+            typing.Literal[
+                "depth",
+                "velocity",
+                "grain_stress",
+                "total_transport_rate",
+                "transport_rate",
+                "mean_bed_level",
+                "min_bed_level",
+            ]
+        ]
+    ) = p.Field(default_factory=list)
 
 
 class GrateConfig(GrateBase):
@@ -330,7 +345,7 @@ class GrateConfig(GrateBase):
 
     grain_size_profiles: GrainSizeProfiles
 
-    print: PrintOptions
+    output: OutputOptions
 
     # start out with maximum dt
     @p.computed_field
@@ -342,6 +357,7 @@ class GrateConfig(GrateBase):
 
     @p.model_validator(mode="after")
     def post_validate(self):
+        self._load_output_variables()
         self._check_discretisation()
         self._check_cross_sections()
         self._check_grain_size()
@@ -349,7 +365,31 @@ class GrateConfig(GrateBase):
         self._load_downstream_boundary()
         self._load_sediment_boundary_timeseries()
         self._check_sediment_boundary()
+        self._check_unit_changes()
         return self
+
+    def _load_output_variables(self):
+        if self.output.variables == "all":
+            self.output.variables = [
+                "depth",
+                "velocity",
+                "grain_stress",
+                "total_transport_rate",
+                "transport_rate",
+                "mean_bed_level",
+                "min_bed_level",
+            ]
+
+    def _check_unit_changes(self):
+        # old gin was in tons and mm, we go to m, so check some ranges
+        if not all(
+            1_000 < d < 10_000 for d in self.grain_size_profiles.sediment_densities
+        ):
+            raise ValueError("Sediment densities not in 1_000 to 10_000")
+
+        for row in self.grain_size_profiles.grain_size_cfds:
+            if row[0] < 0.00004 or row[0] > 2:
+                raise ValueError(f"Grain size profile {row[0]} not in [0.00004, 2]")
 
     def _check_discretisation(self):
         if self.discretisation.chainage_min >= self.discretisation.chainage_max:

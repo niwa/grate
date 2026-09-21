@@ -26,7 +26,7 @@ SECTION_MAPPINGS = {
     "Inflow Boundary Conditions": "inflow_boundary",
     "Sediment Inflow Boundary Conditions": "sediment_boundary",
     "Grain-Size Profiles": "grain_size_profiles",
-    "Print Options": "print",
+    "Print Options": "output",
     "Display Options": "display",
     "Downstream Water Level Boundary": "downstream_boundary",
     "Hydraulic calibration data": "hydraulic_calibration",
@@ -47,7 +47,7 @@ GIN_VALUE_MAPPINGS = {
     }
 }
 SECTIONS_TO_IGNORE = ["display", "hydraulic_calibration", "bed_layer", "active_layer"]
-KEYS_TO_IGNORE = ["VERSID"]
+KEYS_TO_IGNORE = ["VERSID", "OUTXSPARMS"]
 
 
 def ykey(key: str) -> str:
@@ -57,6 +57,7 @@ def ykey(key: str) -> str:
         "TS": "start",
         "TE": "end",
         "NO_CYCLES": "num_cycles",
+        "NPRTF": "frequency",
     }.get(key, key.lower())
 
 
@@ -448,7 +449,7 @@ def parse_grain_size_profiles(kv):
     ngsz = cfg["ngsz"]
     nlith = cfg["nlith"]
     abrasion = cfg["abrasion"]
-    sediment = cfg["sediment"] * 1000  # old gin format is in tons/m^3 we want kg/m^3
+    sediment = [d * 1000 for d in cfg["sediment"]]  # old gin in tons/m^3 want kg/m^3
 
     # there should be ngsz+1 grain size rows, and nzgs*nlith lith rows
     assert ngsz * (nlith + 1) + 1 == len(cfg["datarows"]), (
@@ -457,6 +458,9 @@ def parse_grain_size_profiles(kv):
 
     grows = cfg["datarows"][: ngsz + 1]
     lrows = cfg["datarows"][ngsz + 1 :]
+
+    # old gin had grain size in mm, we want meters
+    grows = [[row[0] / 1000] + row[1:] for row in grows]
 
     assert all([len(g) == ngrp + 1 for g in grows]), (
         "Grain distribution rows didn't have {ngrp+1} elements"
@@ -607,6 +611,17 @@ def parse_gin(fname: pathlib.Path) -> dict:
             sys.stderr.write(
                 "Can only handle flume, river and braided_channel model, left cross sections file alone\n"
             )
+
+    # guess these for the conversion, if wrong user will have to fix
+    kv["discretisation"]["chainage_min"] = min(
+        p["chainage"] for p in kv["cross_sections"]["profiles"]
+    )
+    kv["discretisation"]["chainage_max"] = max(
+        p["chainage"] for p in kv["cross_sections"]["profiles"]
+    )
+    kv["model"]["hydro_model_type"] = "quasi_ss"
+    kv["output"]["fname"] = str(fname.parent / f"{fname.stem}_output.nc")
+    kv["output"]["variables"] = "all"
 
     return kv
 

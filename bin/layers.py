@@ -79,7 +79,7 @@ class LayerStack:
         u = hydro.u(t, self.chainidx)
         Sf = hydro.Sf(t, self.chainidx)
         ks = self.d90()
-        h = hydro.h[self.chainidx]
+        h = hydro.d[self.chainidx]
 
         last_x = None
 
@@ -103,7 +103,7 @@ class LayerStack:
         except RuntimeError as e:
             x = last_x
             if x is not None:
-                for i in np.linspace(0.999 * x, 1.001 * x, 2000):
+                for i in np.linspace(0.999 * x, 1.001 * x, 20):
                     print(i, f(i))
                 print(f"GSV, {u=} {Sf=} {ks=} {h=}")
 

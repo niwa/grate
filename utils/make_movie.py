@@ -12,6 +12,8 @@ import xarray as xr
 def make_movie(
     netcdf_file: pathlib.Path,
     variable: str,
+    xdim: str,
+    seldims: dict[str, int | float | str],
     movie_file: pathlib.Path,
     duration: float,
 ):
@@ -19,35 +21,44 @@ def make_movie(
 
     if variable not in ds:
         raise ValueError(
-            f"Variable {variable!r} not found in {netcdf_file}. "
-            f"Available variables: {list(ds.data_vars)}"
+            f"{variable} not in {netcdf_file}. Available variables: {list(ds.data_vars)}"
         )
-
     data = ds[variable]
 
     if "time" not in data.dims:
         raise ValueError(
-            f"Variable {variable!r} does not have a 'time' dimension. "
+            f"{variable!r} does not have a 'time' dimension. "
             f"Dimensions are: {data.dims}"
         )
 
-    # Everything other than time is plotted against cidx.
-    other_dims = [dim for dim in data.dims if dim != "time"]
-
-    if len(other_dims) != 1:
+    if xdim not in data.dims:
         raise ValueError(
-            f"Expected {variable!r} to have dimensions "
-            f"(time, cidx), but got {data.dims}"
+            f"Dimension {xdim!r} not present in {variable!r}. "
+            f"Dimensions are: {data.dims}"
         )
 
-    cidx_dim = other_dims[0]
+    # Select any dimensions specified on the command line.
+    for dim, value in seldims.items():
+        if dim not in data.dims:
+            raise ValueError(
+                f"Dim {dim} not present in {variable}. Dims are: {data.dims}"
+            )
+        data = data.isel({dim: value})
 
-    # Use the actual cidx coordinate if it exists, otherwise use
-    # integer indices.
-    if cidx_dim in data.coords:
-        cidx = data[cidx_dim].values
+    # After selections, we should have exactly time + xdim.
+    if set(data.dims) != {"time", xdim}:
+        raise ValueError(
+            f"After applying selections, {variable} has dimensions "
+            f"{data.dims}; expected only 'time' and {xdim!r}"
+        )
+
+    # Put dimensions in the order we expect below.
+    data = data.transpose("time", xdim)
+
+    if xdim in data.coords:
+        x = data[xdim].values
     else:
-        cidx = range(data.sizes[cidx_dim])
+        x = range(data.sizes[xdim])
 
     movie_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -76,17 +87,14 @@ def make_movie(
 
             fig, ax = plt.subplots(figsize=(10, 6))
 
-            ax.plot(cidx, values)
-
-            ax.set_xlabel("cidx")
+            ax.plot(x, values)
+            ax.set_xlabel(xdim)
             ax.set_ylabel(variable)
             ax.set_ylim(ymin, ymax)
             ax.set_title(f"{variable}   {t}")
-
             ax.grid(True)
 
             frame = tmpdir / f"frame_{i:06d}.png"
-
             fig.tight_layout()
             fig.savefig(frame, dpi=120)
             plt.close(fig)
@@ -122,26 +130,19 @@ def make_movie(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Make a movie from an xarray NetCDF variable."
+        description="Make movie for xarray NetCDF variable"
     )
-
+    parser.add_argument("netcdf", type=pathlib.Path, help="Input NetCDF")
+    parser.add_argument("variable", help="Variable to plot, eg depth ")
+    parser.add_argument("xdim", help="Dimension on x axis, eg chainage")
     parser.add_argument(
-        "netcdf",
-        type=pathlib.Path,
-        help="Input NetCDF file",
+        "--selection",
+        action="append",
+        default=[],
+        metavar="DIM=INDEX",
+        help="Select an index for a dimension, eg --selection rgsize=10",
     )
-
-    parser.add_argument(
-        "variable",
-        help="Variable to plot, e.g. height or flow",
-    )
-
-    parser.add_argument(
-        "movie",
-        type=pathlib.Path,
-        help="Output movie filename, e.g. height.mp4",
-    )
-
+    parser.add_argument("movie", type=pathlib.Path, help="Output filename, eg out.mp4")
     parser.add_argument(
         "--duration",
         type=float,
@@ -151,12 +152,22 @@ def main():
 
     args = parser.parse_args()
 
+    selections = {}
+    for kv in args.selection:
+        try:
+            dim, index = kv.split("=", 1)
+            selections[dim] = int(index)
+        except ValueError:
+            parser.error(f"Invalid selection {kv}; expected DIM=INT")
+
     if args.duration <= 0:
         parser.error("--duration must be greater than zero")
 
     make_movie(
         args.netcdf,
         args.variable,
+        args.xdim,
+        selections,
         args.movie,
         args.duration,
     )
