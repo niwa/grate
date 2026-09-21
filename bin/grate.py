@@ -10,6 +10,7 @@ import pathlib
 import updates
 from convert_gin import parse_gin
 from gin import GrateConfig
+from simulate import run_model
 
 # parse command line
 p = argparse.ArgumentParser(
@@ -75,6 +76,7 @@ match args.command:
     case "run":
         updates.version_check()
         print(f"Running {args.yaml}")
+        run_model(args.yaml)
 
     case _:
         p.print_help()
