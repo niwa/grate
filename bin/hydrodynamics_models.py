@@ -1,7 +1,9 @@
 import math
 import numpy as np
 import pandas as pd
-import scipy.optimize
+
+# import scipy.optimize
+import utils
 from gin import GrateConfig
 from channel import Channel, Loc
 
@@ -144,9 +146,10 @@ class HydroDynamicModel:
                 K = self.conveyance(lastchain, d)
                 return Q - K * math.sqrt(slope)
 
-            d, info = scipy.optimize.newton(f, self.d[lastchain], full_output=True)
-            if not info.converged:
-                raise ValueError(f"Can't solve downstream normal depth. {info=}")
+            # d, info = scipy.optimize.newton(f, self.d[lastchain], full_output=True)
+            # if not info.converged:
+            #     raise ValueError(f"Can't solve downstream normal depth. {info=}")
+            d = utils.newton(f, self.d[lastchain])
             return d
 
         raise ValueError(f"Unknown downstream boundary type: {tv['type']}")
@@ -237,15 +240,15 @@ class QuasiSteadyModel(HydroDynamicModel):
             def fprime(d):
                 return self.dEdd(t, i, d)
 
-            d, info = scipy.optimize.newton(
-                f,
-                self.d[i],
-                fprime=fprime,
-                full_output=True,
-            )
-            if not info.converged:
-                raise ValueError(f"Can't solve for new d at index {i}. {info=}")
-            # print(f"At {i=} was {self.d[i]} now {d}")
+            # d, info = scipy.optimize.newton(
+            #     f,
+            #     self.d[i],
+            #     fprime=fprime,
+            #     full_output=True,
+            # )
+            # if not info.converged:
+            #     raise ValueError(f"Can't solve for new d at index {i}. {info=}")
+            d = utils.newton(f, self.d[i], fprime=fprime)
             self.d[i] = d
 
 

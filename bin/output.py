@@ -28,7 +28,7 @@ def combine_netcdfs(idir: pathlib.Path) -> xr.Dataset:
     """
 
     files = sorted(idir.glob("*.nc"))
-    datasets = [xr.open_dataset(f) for f in files]
+    datasets = [xr.open_dataset(f, engine="h5netcdf") for f in files]
     try:
         ds = xr.concat(datasets, dim="time")
         time0 = pd.Timestamp(ds.time.values[0])
@@ -155,9 +155,9 @@ class Output:
         data_vars = {v: fun().expand_dims(time=[t]) for v, fun in self._v2fun.items()}
         outds = xr.Dataset(data_vars=data_vars)
         outfile = self.idir / f"{step:010d}.nc"
-        outds.to_netcdf(outfile, mode="w")
+        outds.to_netcdf(outfile, mode="w", engine="h5netcdf")
 
     def write_final(self):
         """Combine steps into one file"""
         ds = combine_netcdfs(self.idir)
-        ds.to_netcdf(self._outfile)
+        ds.to_netcdf(self._outfile, engine="h5netcdf")

@@ -1,7 +1,9 @@
 import math
 import numpy as np
-import scipy.optimize
+
+# import scipy.optimize
 import pandas as pd
+import utils
 from gin import CrossSectionProfile, GrateConfig
 from grainprofile import get_representative_grain_sizes, get_grain_props
 
@@ -98,19 +100,21 @@ class LayerStack:
         # for i in np.arange(0.01, 2, step=0.1):
         #     print(i, f(i))
 
-        try:
-            ustar, info = scipy.optimize.newton(f_logged, init, full_output=True)
-        except RuntimeError as e:
-            x = last_x
-            if x is not None:
-                for i in np.linspace(0.999 * x, 1.001 * x, 20):
-                    print(i, f(i))
-                print(f"GSV, {u=} {Sf=} {ks=} {h=}")
+        # try:
+        #     ustar, info = scipy.optimize.newton(f_logged, init, full_output=True)
+        # except RuntimeError as e:
+        #     x = last_x
+        #     if x is not None:
+        #         for i in np.linspace(0.999 * x, 1.001 * x, 20):
+        #             print(i, f(i))
+        #         print(f"GSV, {u=} {Sf=} {ks=} {h=}")
+        #
+        #     raise ValueError(f"Can't solve grain_shear_velocity; last ustar={x}") from e
+        #
+        # if not info.converged:
+        #     raise ValueError(f"Can't solve grain_shear_velocity. {info=}")
 
-            raise ValueError(f"Can't solve grain_shear_velocity; last ustar={x}") from e
-
-        if not info.converged:
-            raise ValueError(f"Can't solve grain_shear_velocity. {info=}")
+        ustar = utils.newton(f, init)
 
         return ustar
 

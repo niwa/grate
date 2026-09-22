@@ -80,7 +80,7 @@ def make_movie(
     outfile: pathlib.Path,
 ):
 
-    ds = xr.open_dataset(infile)
+    ds = xr.open_dataset(infile, engine="h5netcdf")
 
     plot_data, x = _prepare_movie_data(ds, var, xdim, sels)
 

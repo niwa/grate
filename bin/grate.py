@@ -3,6 +3,13 @@
 # Compilation mode, support OS-specific options
 # nuitka-project: --mode=standalone
 # nuitka-project: --include-data-dir=etc=etc
+# pandas/numpy can pull in matplotlib and scipy, don't want the bloat
+# nuitka-project: --nofollow-import-to=matplotlib
+# nuitka-project: --nofollow-import-to=scipy
+# xarray needs an engine
+# nuitka-project: --include-package=h5netcdf
+# nuitka-project: --include-package=h5py
+# nuitka-project: --nofollow-import-to=h5netcdf.tests,pytest,unittest
 
 import argparse
 import yaml
@@ -89,7 +96,7 @@ match args.command:
         updates.version_check()
         ds = combine_netcdfs(args.idir)
         print(f"Writing {args.fname}")
-        ds.to_netcdf(args.fname)
+        ds.to_netcdf(args.fname, engine="h5netcdf")
 
     case _:
         p.print_help()
