@@ -2,6 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 from enum import Enum
+from functools import lru_cache
 from gin import GrateConfig, CrossSectionProfile
 from layers import LayerStack
 
@@ -56,7 +57,9 @@ class CrossSection:
             self.df["roughness"] = self.formrf
 
         # break into left, channel and right
-        self.left, self.channel, self.right = self._split_pts_into_three(self.df)
+        self.profile, self.left, self.channel, self.right = self._split_pts_into_three(
+            self.df
+        )
 
         self.mean_bed_level = self._calculate_mean_bed_level()
         self.min_bed_level = self._calculate_min_bed_level()
@@ -135,41 +138,59 @@ class CrossSection:
         return self.layers.f_interface(aggrading, p)
 
     def _split_pts_into_three(self, df):
-        """Return three dataframes, left, channel and right bank"""
-        if "ob" not in df.columns:
-            return (df.iloc[:0], df, df.iloc[:0])
+        """Return entire profile, left, channel and right profiles as NumPy arrays.
 
-        i1 = df.index[df["ob"] == 1]
-        i2 = df.index[df["ob"] == 2]
-        i1 = None if i1.empty else i1[0]
-        i2 = None if i2.empty else i2[0]
+        Each array has columns: x, y, roughness.
+        """
+
+        # FIXME, can remove after a while when I've remembered what is allowed
+        # in profile csv
+        assert set(df.columns) <= {"x", "y", "roughness", "ob"}, (
+            f"Unexpected profile columns: "
+            f"{sorted(set(df.columns) - {'x', 'y', 'roughness', 'ob'})}"
+        )
+
+        if "ob" not in df.columns:
+            data = df[["x", "y", "roughness"]].to_numpy()
+            return data, data[:0], data, data[:0]
+
+        data = df[["x", "y", "roughness", "ob"]].to_numpy()
+
+        i1 = np.flatnonzero(data[:, 3] == 1)
+        i2 = np.flatnonzero(data[:, 3] == 2)
+
+        i1 = None if len(i1) == 0 else i1[0]
+        i2 = None if len(i2) == 0 else i2[0]
 
         if i1 is not None and i2 is not None:
             assert i1 <= i2, "ob==1 must occur before ob==2"
 
-        if i1 is None:
-            left = df.iloc[:0]
-            if i2 is None:
-                channel = df
-                right = df.iloc[:0]
-            else:
-                channel = df.iloc[: i2 + 1]
-                right = df.iloc[i2:]
-        else:
-            left = df.iloc[: i1 + 1]
-            if i2 is None:
-                channel = df.iloc[i1:]
-                right = df.iloc[:0]
-            else:
-                channel = df.iloc[i1 : i2 + 1]
-                right = df.iloc[i2:]
+        # We don't need ob in the resulting arrays.
+        data = data[:, :3]
 
-        return (left, channel, right)
+        if i1 is None:
+            left = data[:0]
+            if i2 is None:
+                channel = data
+                right = data[:0]
+            else:
+                channel = data[: i2 + 1]
+                right = data[i2:]
+        else:
+            left = data[: i1 + 1]
+            if i2 is None:
+                channel = data[i1:]
+                right = data[:0]
+            else:
+                channel = data[i1 : i2 + 1]
+                right = data[i2:]
+
+        return data, left, channel, right
 
     def _calculate_mean_bed_level(self):
         """Return weighted mean of the bed elevations in channel"""
-        x = self.channel["x"].to_numpy()
-        y = self.channel["y"].to_numpy()
+        x = self.channel[:, 0]
+        y = self.channel[:, 1]
         match len(x):
             case 0:
                 raise ValueError("Channel profile has no points.")
@@ -183,37 +204,34 @@ class CrossSection:
 
     def _calculate_min_bed_level(self):
         """The minimum bed level."""
-        return self.channel["y"].min()
+        return self.channel[:, 1].min()
 
     def aggrade_bed(self, dy):
         """Add dy to the channel bed level (dy can be negative)."""
-        self.channel["y"] += dy
+        self.channel[:, 1] += dy
         self.min_bed_level += dy
-        # FIXME, can remove after sure mean bed level just changes by dy
-        np.testing.assert_allclose(
-            self._calculate_mean_bed_level(), self.mean_bed_level + dy
-        )
         self.mean_bed_level += dy
 
     def grain_stress(self, t: pd.Timestamp, hydro):
         return self.layers.grain_stress(t, hydro)
 
-    def _wetted_segments(self, h: float, loc: Loc | None = None):
+    @lru_cache(maxsize=None)
+    def _wetted_segments(self, h: float, loc: Loc | None, min_bed_level: float):
         """Yield roughness, perimeter, width and area for each wetted segment."""
-        water_level = self.min_bed_level + h
+        water_level = min_bed_level + h
 
-        df = {
+        profile = {
             Loc.LEFT: self.left,
             Loc.CHANNEL: self.channel,
             Loc.RIGHT: self.right,
-            None: self.df,
+            None: self.profile,
         }[loc]
 
-        x = df["x"].to_numpy()
-        y = df["y"].to_numpy()
-        r = df["roughness"].to_numpy()
+        x = profile[:, 0]
+        y = profile[:, 1]
+        r = profile[:, 2]
 
-        # print(f"wetted_seg h={h} loc={loc} df={df}")
+        result = []
 
         for x0, x1, y0, y1, rough in zip(x[:-1], x[1:], y[:-1], y[1:], r[1:]):
             # seg is above
@@ -244,23 +262,31 @@ class CrossSection:
                 width = dx
                 area = 0.5 * dx * dy
 
-            yield rough, peri, width, area
+            result.append((rough, peri, width, area))
+
+        return tuple(result)
 
     def Bchan(self):
         """Return channel width"""
-        return self.channel.iloc[-1].x - self.channel.iloc[0].x
+        return self.channel[-1, 0] - self.channel[0, 0]
 
     def Bwet(self, h: float):
         """Return water surface width for given depth."""
-        return sum(w for _, _, w, _ in self._wetted_segments(h))
+        return sum(
+            w for _, _, w, _ in self._wetted_segments(h, None, self.min_bed_level)
+        )
 
     def P(self, h: float, loc: Loc | None = None):
         """Wetted perimeter for given water level."""
-        return sum(p for _, p, _, _ in self._wetted_segments(h, loc))
+        return sum(
+            p for _, p, _, _ in self._wetted_segments(h, loc, self.min_bed_level)
+        )
 
     def area(self, h: float, loc: Loc | None = None):
         """Area of water below this height."""
-        return sum(a for _, _, _, a in self._wetted_segments(h, loc))
+        return sum(
+            a for _, _, _, a in self._wetted_segments(h, loc, self.min_bed_level)
+        )
 
     def nf(self, h: float, loc: Loc):
         """Return form roughness for the wetted cross-section.
@@ -275,7 +301,7 @@ class CrossSection:
         peri = 0.0
         weighted_p = 0.0
 
-        for rough, p, _, _ in self._wetted_segments(h, loc):
+        for rough, p, _, _ in self._wetted_segments(h, loc, self.min_bed_level):
             peri += p
             weighted_p += rough * p
 

@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import tempfile
+import h5py
 from gin import GrateConfig
 from channel import Channel
 from hydrodynamics_models import HydroDynamicModel
@@ -65,65 +66,79 @@ class Output:
             self._tmpdir = tempfile.TemporaryDirectory()
             self.idir = pathlib.Path(self._tmpdir.name)
 
-        # map user variable name to method for producing that DataArray
-        v2fun = {
-            "depth": self.get_depth,
-            "velocity": self.get_velocity,
-            "grain_stress": self.get_grain_stress,
-            "total_transport_rate": self.get_total_transport_rate,
-            "transport_rate": self.get_transport_rate,
-            "mean_bed_level": self.get_mean_bed_level,
-            "min_bed_level": self.get_min_bed_level,
+        data_funs = {
+            "depth": self._get_depth,
+            "velocity": self._get_velocity,
+            "grain_stress": self._get_grain_stress,
+            "total_transport_rate": self._get_total_transport_rate,
+            "transport_rate": self._get_transport_rate,
+            "mean_bed_level": self._get_mean_bed_level,
+            "min_bed_level": self._get_min_bed_level,
         }
-        self._v2fun = {v: v2fun[v] for v in cfg.output.variables}
+
+        # map user variable name to method for producing that DataArray
+        self._v2np = {v: data_funs[v] for v in cfg.output.variables}
+        self._v2da = {v: getattr(self, f"get_{v}") for v in cfg.output.variables}
+
+    def _get_depth(self):
+        return self._hmodel.d.copy()
 
     def get_depth(self):
         return xr.DataArray(
-            self._hmodel.d.copy(),
+            self._get_depth(),
             dims=("chainage",),
             coords={"chainage": self._cs},
             name="depth",
         )
 
+    def _get_velocity(self):
+        return np.array([self._hmodel.u(self.time, c) for c in self._cidx])
+
     def get_velocity(self):
         return xr.DataArray(
-            np.array([self._hmodel.u(self.time, c) for c in self._cidx]),
+            self._get_velocity(),
             dims=("chainage",),
             coords={"chainage": self._cs},
             name="velocity",
+        )
+
+    def _get_grain_stress(self):
+        return np.array(
+            [self._chan.grain_stress(c, self.time, self._hmodel) for c in self._cidx]
         )
 
     def get_grain_stress(self):
         return xr.DataArray(
-            np.array(
-                [
-                    self._chan.grain_stress(c, self.time, self._hmodel)
-                    for c in self._cidx
-                ]
-            ),
+            self._get_grain_stress(),
             dims=("chainage",),
             coords={"chainage": self._cs},
-            name="velocity",
+            name="grain_stress",
+        )
+
+    def _get_total_transport_rate(self):
+        return np.array(
+            [
+                self._chan.get_Qb_jli(c, self.time, self._hmodel).sum()
+                for c in self._cidx
+            ]
         )
 
     def get_total_transport_rate(self):
         return xr.DataArray(
-            np.array(
-                [
-                    self._chan.get_Qb_jli(c, self.time, self._hmodel).sum()
-                    for c in self._cidx
-                ]
-            ),
+            self._get_total_transport_rate(),
             dims=("chainage",),
             coords={"chainage": self._cs},
             name="total_transport_rate",
         )
 
+    def _get_transport_rate(self):
+        return np.array(
+            [self._chan.get_Qb_jli(c, self.time, self._hmodel) for c in self._cidx]
+        )
+
     def get_transport_rate(self):
         return xr.DataArray(
-            np.array(
-                [self._chan.get_Qb_jli(c, self.time, self._hmodel) for c in self._cidx]
-            ),
+            self._get_transport_rate(),
             dims=("chainage", "rel_grain_sizes", "lith"),
             coords={
                 "chainage": self._cs,
@@ -133,17 +148,23 @@ class Output:
             name="transport_rate",
         )
 
+    def _get_mean_bed_level(self):
+        return np.array([self._chan.get_mean_bed_level(c) for c in self._cidx])
+
     def get_mean_bed_level(self):
         return xr.DataArray(
-            np.array([self._chan.get_mean_bed_level(c) for c in self._cidx]),
+            self._get_mean_bed_level(),
             dims=("chainage",),
             coords={"chainage": self._cs},
             name="mean_bed_level",
         )
 
+    def _get_min_bed_level(self):
+        return np.array([self._chan.get_min_bed_level(c) for c in self._cidx])
+
     def get_min_bed_level(self):
         return xr.DataArray(
-            np.array([self._chan.get_min_bed_level(c) for c in self._cidx]),
+            self._get_min_bed_level(),
             dims=("chainage",),
             coords={"chainage": self._cs},
             name="min_bed_level",
@@ -152,7 +173,7 @@ class Output:
     def write_step(self, step: int, t: dt.datetime):
         """Possibly write output for given step"""
         self.time = t
-        data_vars = {v: fun().expand_dims(time=[t]) for v, fun in self._v2fun.items()}
+        data_vars = {v: fun().expand_dims(time=[t]) for v, fun in self._v2da.items()}
         outds = xr.Dataset(data_vars=data_vars)
         outfile = self.idir / f"{step:010d}.nc"
         outds.to_netcdf(outfile, mode="w", engine="h5netcdf")
@@ -161,3 +182,40 @@ class Output:
         """Combine steps into one file"""
         ds = combine_netcdfs(self.idir)
         ds.to_netcdf(self._outfile, engine="h5netcdf")
+
+
+class OutputH5(Output):
+    """Output directly to a single NetCDF file using h5py."""
+
+    def __init__(self, cfg: GrateConfig, hmodel: HydroDynamicModel, chan: Channel):
+        super().__init__(cfg, hmodel, chan)
+        self._initialised = False
+
+    def write_step(self, step: int, t: dt.datetime):
+        """Append output for this timestep directly to the NetCDF file."""
+        self.time = t
+
+        # Use xarray to make first file
+        if not self._initialised:
+            ds = xr.Dataset(
+                data_vars={
+                    v: fun().expand_dims(time=[t]) for v, fun in self._v2da.items()
+                }
+            )
+            ds.to_netcdf(
+                self._outfile, mode="w", engine="h5netcdf", unlimited_dims=["time"]
+            )
+            self._initialised = True
+            return
+
+        with h5py.File(self._outfile, "r+") as f:
+            n = f["time"].shape[0]
+            f["time"].resize((n + 1,))
+            f["time"][n] = np.datetime64(t)
+            for v, fun in self._v2np.items():
+                dset = f[v]
+                dset.resize((n + 1,) + dset.shape[1:])
+                dset[n, ...] = fun()
+
+    def write_final(self):
+        pass

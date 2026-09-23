@@ -1,8 +1,8 @@
 import math
 import numpy as np
 import pandas as pd
+from functools import lru_cache
 
-# import scipy.optimize
 import utils
 from gin import GrateConfig
 from channel import Channel, Loc
@@ -169,6 +169,7 @@ class QuasiSteadyModel(HydroDynamicModel):
             self.d[-1] = tv["normal"]["hinit"]
             self.d[-1] -= self._channel.get_min_bed_level(len(self.cs) - 1)
 
+    @lru_cache(maxsize=100)
     def Q(self, t: pd.Timestamp, c: int):
         """Return flow at point along river
 

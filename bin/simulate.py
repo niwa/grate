@@ -5,7 +5,7 @@ import pandas as pd
 from gin import GrateConfig
 from channel import Channel
 from hydrodynamics_models import QuasiSteadyModel
-from output import Output
+from output import OutputH5
 
 
 def run_model(infile: pathlib.Path):
@@ -17,7 +17,7 @@ def run_model(infile: pathlib.Path):
     start = cfg.simulation_time.start
     end = cfg.simulation_time.end
 
-    out = Output(cfg, hmodel, chan)
+    out = OutputH5(cfg, hmodel, chan)
 
     step = 0
     t = start
@@ -36,6 +36,7 @@ def run_model(infile: pathlib.Path):
     if (step - 1) % cfg.output.frequency != 0:
         out.write_step(step - 1, t - dt)
 
+    # for H5 don't need this since already been updating file
     out.write_final()
 
 

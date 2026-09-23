@@ -83,22 +83,11 @@ class LayerStack:
         ks = self.d90()
         h = hydro.d[self.chainidx]
 
-        last_x = None
-
-        def f_logged(x):
-            nonlocal last_x
-            last_x = x
-            return f(x)
-
         def f(ustar):
             hs = ustar**2 / GRAVITY / Sf
             return ustar - u * KAPPA / math.log(11 * hs / ks)
 
         init = u * KAPPA / math.log(11 * h / ks)
-        # print(f"GSV, {u=} {Sf=} {ks=} {h=} {init=}")
-
-        # for i in np.arange(0.01, 2, step=0.1):
-        #     print(i, f(i))
 
         # try:
         #     ustar, info = scipy.optimize.newton(f_logged, init, full_output=True)
@@ -119,7 +108,7 @@ class LayerStack:
         return ustar
 
     def grain_stress(self, t: pd.Timestamp, hydro):
-        """Graint stress tau_g
+        """Grain stress tau_g
 
         From equation 10.5
 
@@ -250,13 +239,3 @@ class LayerStack:
             return self.chi * self.acfd + (1 - self.chi) * p
         else:
             return self.scfd
-
-    def update_grains_in_alayer(self, deltaf_jli: np.array):
-        """Update proportion grain sizes
-
-        Parameters
-        ----------
-        deltaf_jli: np.array
-            nbins x nlith change in grain proportions
-        """
-        self.acfd += deltaf_jli
