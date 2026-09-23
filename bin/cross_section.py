@@ -122,12 +122,6 @@ class CrossSection:
 
         return cs
 
-    def __get_formrf_del(self):
-        return self.formrf
-
-    def __get_wallrf_del(self):
-        return self.wallrf
-
     def d90(self, loc: Loc):
         if loc == Loc.CHANNEL:
             return self.layers.get_d90()
@@ -276,12 +270,6 @@ class CrossSection:
             w for _, _, w, _ in self._wetted_segments(d, None, self.min_bed_level)
         )
 
-    def __P_del(self, d: float, loc: Loc | None = None):
-        """Wetted perimeter for given water level."""
-        return sum(
-            p for _, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level)
-        )
-
     @lru_cache(maxsize=400)
     def _P_cached(self, d: float, loc: Loc | None, min_bed_level):
         """Wetted perimeter for given water level."""
@@ -295,26 +283,6 @@ class CrossSection:
     def _area_cached(self, d: float, loc: Loc | None, min_bed_level):
         """Area of water below this height."""
         return sum(a for _, _, _, a in self._wetted_segments(d, loc, min_bed_level))
-
-    def __nf_del(self, d: float, loc: Loc):
-        """Return form roughness for the wetted cross-section.
-
-        formrf * sum_k (r_k * p_k) / P
-
-        formrf is the default form roughness of cross-section
-        rk and pk are relative roughness and wetted perimeter
-        P is the wetted perimeter
-
-        """
-        peri = 0.0
-        weighted_p = 0.0
-
-        for rough, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level):
-            peri += p
-            weighted_p += rough * p
-
-        # don't need to multiply by formrf since roughness already done that
-        return weighted_p / peri
 
     @lru_cache(maxsize=400)
     def _nf_cached(self, d: float, loc: Loc, min_bed_level):

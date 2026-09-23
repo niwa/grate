@@ -95,25 +95,6 @@ class Channel:
         """Momentum correction factor"""
         return 1
 
-    def __d90_del(self, c: int, loc: Loc):
-        """90th percentile of the grain diameter.
-
-        Referred to in Eq 8.4
-
-        The grain diameter of the surface layer, and in the case of the
-        floodplain use bank d90 from config file if specified else surface
-        layer
-        """
-        return self.xss[c].d90(loc)
-
-    def __ng_del(self, c: int, loc: Loc):
-        """Grain roughness at given chainage"""
-        return 0.044 * self.d90(c, loc) ** (1 / 6)
-
-    def __nf_del(self, c: int, h: float, loc: Loc):
-        """Form roughness"""
-        return self.xss[c].nf(h, loc)
-
     def area(self, c: int, h: float, loc: Loc | None = None):
         """Return area of water between bed and h"""
         return self.xss[c].area(h, loc)

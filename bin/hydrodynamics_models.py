@@ -63,14 +63,6 @@ class HydroDynamicModel:
             d = self.d[c]
         return self.Q(t, c) / self.A(c, d)
 
-    def __ng_del(self, c: int, loc: Loc):
-        """Grain roughness"""
-        return self._channel.ng(c, loc)
-
-    def __nf_del(self, c: int, d: float, loc: Loc):
-        """Form roughness"""
-        return self._channel.nf(c, d, loc)
-
     def conveyance(self, c: int, d: float | None = None):
         """K conveyance
 
