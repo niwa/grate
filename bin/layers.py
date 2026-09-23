@@ -31,12 +31,18 @@ class LayerStack:
         self.rgsizes = get_representative_grain_sizes(gs.grain_size_cfds)
 
         # nbins x nlith
-        self.acfd = get_grain_props(
+        self._acfd = get_grain_props(
             xs.active_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
         )
-        self.scfd = get_grain_props(
+        self._scfd = get_grain_props(
             xs.storage_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
         )
+
+        # FIXME, 2 or 0.002 ???
+        self._sand_fraction = self._grain_proportion_small_than(2)
+
+        self._d90 = self._grain_size_percentile(0.9)
+        self._dsm = self._grain_size_percentile(0.5)
 
         # phi, representative bin value (Dj) in mm
         # 2** (( log(bot) + log(top) ) / 2)
@@ -55,7 +61,15 @@ class LayerStack:
         result.nlith = self.nlith
         result.rgsizes = self.rgsizes
 
-        for k in ["abrasion_coeffs", "sediment_densities", "acfd", "scfd"]:
+        for k in [
+            "abrasion_coeffs",
+            "sediment_densities",
+            "_acfd",
+            "_scfd",
+            "_sand_fraction",
+            "_dsm",
+            "_d90",
+        ]:
             m = np.array(getattr(self, k))
             o = np.array(getattr(other, k))
             setattr(result, k, m + f * (o - m))
@@ -80,14 +94,13 @@ class LayerStack:
 
         u = hydro.u(t, self.chainidx)
         Sf = hydro.Sf(t, self.chainidx)
-        ks = self.d90()
-        h = hydro.d[self.chainidx]
+        ks = self._d90
 
         def f(ustar):
             hs = ustar**2 / GRAVITY / Sf
             return ustar - u * KAPPA / math.log(11 * hs / ks)
 
-        init = u * KAPPA / math.log(11 * h / ks)
+        init = u * KAPPA / math.log(11 * hydro.d[self.chainidx] / ks)
 
         # try:
         #     ustar, info = scipy.optimize.newton(f_logged, init, full_output=True)
@@ -117,17 +130,9 @@ class LayerStack:
         ustar = self.grain_shear_velocity(t, hydro)
         return WATER_DENSITY * ustar**2
 
-    def d90(self):
+    def get_d90(self):
         """90th percentile of grain sizes in active layer."""
-        return self._grain_size_percentile(0.9)
-
-    def dsm(self):
-        """Median of grain sizes in active layer."""
-        return self._grain_size_percentile(0.5)
-
-    def sand_fraction(self):
-        """Fraction of grains with size < 2mm in active layer"""
-        return self._grain_proportion_small_than(2)
+        return self._d90
 
     def _grain_size_percentile(self, x: float):
         """Grain size in active layer over all lith at this percentile
@@ -146,7 +151,7 @@ class LayerStack:
         assert 0 <= x <= 1
 
         # sum over lith groups and get cumulative sum
-        prop = self.acfd.sum(axis=1)
+        prop = self._acfd.sum(axis=1)
         cf = np.cumsum(prop)
 
         # interpolate x in cf to find where we are in phi = -log(rgsizes)
@@ -171,7 +176,7 @@ class LayerStack:
         assert 0 < x
 
         # sum over lith groups and get cumulative sum
-        prop = self.acfd.sum(axis=1)
+        prop = self._acfd.sum(axis=1)
         cf = np.cumsum(prop)
 
         # interpolate -log(x) in -log(rgsizes) to find where we are cf
@@ -192,15 +197,15 @@ class LayerStack:
 
         rgsizes = np.expand_dims(self.rgsizes, 1)  # (nbins, 1)
 
-        Fs = self.sand_fraction()
+        Fs = self._sand_fraction
         phirm = 0.021 + 0.015 * np.exp(-20 * Fs)
         s = self.sediment_densities / WATER_DENSITY  # (nlith, )
-        dsm = self.dsm()
+        dsm = self._dsm
         tau_rm = phirm * (s - 1) * WATER_DENSITY * GRAVITY * dsm
         b = 0.67 / (1 + np.exp(1.5 - rgsizes / dsm))  # (nbins, 1 )
         tau_rj = tau_rm * (rgsizes / dsm) ** b  # (nbins, nlith)
         phi = self.grain_stress(t, hydro) / tau_rj  # (nbins, nlith)
-        Fj = self.acfd  # (nbins, nlith)
+        Fj = self._acfd  # (nbins, nlith)
         ustar = self.grain_shear_velocity(t, hydro)
 
         q = Fj * ustar**3 / (s - 1) / GRAVITY  # (nbins, nlith)
@@ -236,6 +241,12 @@ class LayerStack:
         """
 
         if aggrading:
-            return self.chi * self.acfd + (1 - self.chi) * p
+            return self.chi * self._acfd + (1 - self.chi) * p
         else:
-            return self.scfd
+            return self._scfd
+
+    def add_to_acfd(self, df):
+        self._acfd += df
+        self._sand_fraction = self._grain_proportion_small_than(2)
+        self._dsm = self._grain_size_percentile(0.5)
+        self._d90 = self._grain_size_percentile(0.9)

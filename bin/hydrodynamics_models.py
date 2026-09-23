@@ -164,7 +164,7 @@ class QuasiSteadyModel(HydroDynamicModel):
             self.d[-1] = tv["normal"]["hinit"]
             self.d[-1] -= self._channel.get_min_bed_level(len(self.cs) - 1)
 
-    @lru_cache(maxsize=100)
+    @lru_cache(maxsize=400)
     def Q(self, t: pd.Timestamp, c: int):
         """Return flow at point along river
 

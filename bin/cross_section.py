@@ -122,15 +122,15 @@ class CrossSection:
 
         return cs
 
-    def get_formrf(self):
+    def __get_formrf_del(self):
         return self.formrf
 
-    def get_wallrf(self):
+    def __get_wallrf_del(self):
         return self.wallrf
 
     def d90(self, loc: Loc):
         if loc == Loc.CHANNEL:
-            return self.layers.d90()
+            return self.layers.get_d90()
         else:
             return self.bankd90
 
@@ -215,7 +215,7 @@ class CrossSection:
     def grain_stress(self, t: pd.Timestamp, hydro):
         return self.layers.grain_stress(t, hydro)
 
-    @lru_cache(maxsize=200)
+    @lru_cache(maxsize=400)
     def _wetted_segments(self, h: float, loc: Loc | None, min_bed_level: float):
         """Yield roughness, perimeter, width and area for each wetted segment."""
         water_level = min_bed_level + h
@@ -276,29 +276,27 @@ class CrossSection:
             w for _, _, w, _ in self._wetted_segments(d, None, self.min_bed_level)
         )
 
-    def P(self, d: float, loc: Loc | None = None):
+    def __P_del(self, d: float, loc: Loc | None = None):
         """Wetted perimeter for given water level."""
         return sum(
             p for _, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level)
         )
 
-    @lru_cache(maxsize=200)
+    @lru_cache(maxsize=400)
     def _P_cached(self, d: float, loc: Loc | None, min_bed_level):
         """Wetted perimeter for given water level."""
         return sum(p for _, p, _, _ in self._wetted_segments(d, loc, min_bed_level))
 
     def area(self, d: float, loc: Loc | None = None):
         """Area of water below this height."""
-        return sum(
-            a for _, _, _, a in self._wetted_segments(d, loc, self.min_bed_level)
-        )
+        return self._area_cached(d, loc, self.min_bed_level)
 
-    @lru_cache(maxsize=200)
+    @lru_cache(maxsize=400)
     def _area_cached(self, d: float, loc: Loc | None, min_bed_level):
         """Area of water below this height."""
         return sum(a for _, _, _, a in self._wetted_segments(d, loc, min_bed_level))
 
-    def nf(self, d: float, loc: Loc):
+    def __nf_del(self, d: float, loc: Loc):
         """Return form roughness for the wetted cross-section.
 
         formrf * sum_k (r_k * p_k) / P
@@ -318,7 +316,7 @@ class CrossSection:
         # don't need to multiply by formrf since roughness already done that
         return weighted_p / peri
 
-    @lru_cache(maxsize=200)
+    @lru_cache(maxsize=400)
     def _nf_cached(self, d: float, loc: Loc, min_bed_level):
         """Return form roughness for the wetted cross-section.
 
@@ -356,7 +354,7 @@ class CrossSection:
         return self.layers.qb_jli(t, hydro) * self.Bwet(hydro.d[self.chainidx])
 
     def update_alayer_proportions(self, df: np.ndarray):
-        self.layers.acfd += df
+        self.layers.add_to_acfd(df)
 
     def ng(self, loc: Loc):
         """Grain roughness in left/channel/right"""
@@ -376,7 +374,7 @@ class CrossSection:
         """
         return self._conveyance_cached(d, self.min_bed_level)
 
-    @lru_cache(maxsize=200)
+    @lru_cache(maxsize=400)
     def _conveyance_cached(self, d: float, min_bed_level: float):
         """K conveyance
 
@@ -412,7 +410,7 @@ class CrossSection:
         """Hydraulic radius A/P over entire xsection"""
         return self._R_cached(d, self.min_bed_level)
 
-    @lru_cache(maxsize=200)
+    @lru_cache(maxsize=400)
     def _R_cached(self, d: float, min_bed_level: float):
         """Hydraulic radius A/P over entire xsection"""
         return self._area_cached(d, None, min_bed_level) / self._P_cached(
