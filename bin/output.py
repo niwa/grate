@@ -1,10 +1,6 @@
-import shutil
-import pathlib
 import datetime as dt
 import numpy as np
-import pandas as pd
 import xarray as xr
-import tempfile
 import h5py
 from gin import GrateConfig
 from channel import Channel
@@ -12,40 +8,9 @@ from hydrodynamics_models import HydroDynamicModel
 from grainprofile import get_representative_grain_sizes
 
 
-def combine_netcdfs(idir: pathlib.Path) -> xr.Dataset:
-    """Combine netcdfs (they should have a single time) into one netcdf
-
-    Parameters
-    ----------
-    idir: pathlib.Path
-        Inside this directory should be a bunch of netcdf files, each one with
-        a single time value.  When the files are sorted they time should be
-        increasing.  Easiest way to do this is name the files 000.nc 001.nc etc
-
-    Returns
-    -------
-    xr.Dataset
-        A dataset containing the netcdf files combined over time dimension
-    """
-
-    files = sorted(idir.glob("*.nc"))
-    datasets = [xr.open_dataset(f, engine="h5netcdf") for f in files]
-    try:
-        ds = xr.concat(datasets, dim="time")
-        time0 = pd.Timestamp(ds.time.values[0])
-        ds.time.encoding.update(
-            {
-                "units": f"seconds since {time0:%Y-%m-%d}",
-                "dtype": "int64",
-            }
-        )
-    finally:
-        for d in datasets:
-            d.close()
-    return ds
-
-
 class Output:
+    """Output directly to a single NetCDF file using h5py."""
+
     def __init__(self, cfg: GrateConfig, hmodel: HydroDynamicModel, chan: Channel):
         self._hmodel = hmodel
         self._cs = chan.cs
@@ -56,15 +21,6 @@ class Output:
         )
         self._nlith = cfg.grain_size_profiles.num_lith
         self._outfile = cfg.output.fname
-
-        # use a temp dir if none given
-        if cfg.output.idir:
-            self.idir = cfg.output.idir
-            shutil.rmtree(self.idir, ignore_errors=True)
-            self.idir.mkdir(parents=True, exist_ok=True)
-        else:
-            self._tmpdir = tempfile.TemporaryDirectory()
-            self.idir = pathlib.Path(self._tmpdir.name)
 
         data_funs = {
             "depth": self._get_depth,
@@ -79,6 +35,9 @@ class Output:
         # map user variable name to method for producing that DataArray
         self._v2np = {v: data_funs[v] for v in cfg.output.variables}
         self._v2da = {v: getattr(self, f"get_{v}") for v in cfg.output.variables}
+
+        # first step is written with xarray
+        self._initialised = False
 
     def _get_depth(self):
         return self._hmodel.d.copy()
@@ -170,29 +129,8 @@ class Output:
             name="min_bed_level",
         )
 
-    def write_step(self, step: int, t: dt.datetime):
-        """Possibly write output for given step"""
-        self.time = t
-        data_vars = {v: fun().expand_dims(time=[t]) for v, fun in self._v2da.items()}
-        outds = xr.Dataset(data_vars=data_vars)
-        outfile = self.idir / f"{step:010d}.nc"
-        outds.to_netcdf(outfile, mode="w", engine="h5netcdf")
-
-    def write_final(self):
-        """Combine steps into one file"""
-        ds = combine_netcdfs(self.idir)
-        ds.to_netcdf(self._outfile, engine="h5netcdf")
-
-
-class OutputH5(Output):
-    """Output directly to a single NetCDF file using h5py."""
-
-    def __init__(self, cfg: GrateConfig, hmodel: HydroDynamicModel, chan: Channel):
-        super().__init__(cfg, hmodel, chan)
-        self._initialised = False
-
-    def write_step(self, step: int, t: dt.datetime):
-        """Append output for this timestep directly to the NetCDF file."""
+    def write_step(self, t: dt.datetime):
+        """Append output for this timestep to netcdf file."""
         self.time = t
 
         # Use xarray to make first file
@@ -216,6 +154,3 @@ class OutputH5(Output):
                 dset = f[v]
                 dset.resize((n + 1,) + dset.shape[1:])
                 dset[n, ...] = fun()
-
-    def write_final(self):
-        pass

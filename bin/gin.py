@@ -302,7 +302,6 @@ class GrainSizeProfiles(GrateBase):
 
 class OutputOptions(GrateBase):
     frequency: p.StrictInt
-    idir: pathlib.Path | None = None
     fname: pathlib.Path
     variables: (
         typing.Literal["all"]

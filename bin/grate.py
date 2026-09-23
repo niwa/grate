@@ -18,7 +18,6 @@ import updates
 from convert_gin import parse_gin
 from gin import GrateConfig
 from simulate import run_model
-from output import combine_netcdfs
 
 # parse command line
 p = argparse.ArgumentParser(
@@ -59,10 +58,6 @@ validate.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
 runmode = sub.add_parser("run", help="Run yaml model")
 runmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
 
-combinemode = sub.add_parser("combine", help="Combine single timestep netcdfs")
-combinemode.add_argument("idir", type=pathlib.Path, help="Input directory")
-combinemode.add_argument("fname", type=pathlib.Path, help="Output file.nc")
-
 args = p.parse_args()
 
 match args.command:
@@ -91,12 +86,6 @@ match args.command:
         updates.version_check()
         print(f"Running {args.yaml}")
         run_model(args.yaml)
-
-    case "combine":
-        updates.version_check()
-        ds = combine_netcdfs(args.idir)
-        print(f"Writing {args.fname}")
-        ds.to_netcdf(args.fname, engine="h5netcdf")
 
     case _:
         p.print_help()
