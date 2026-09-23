@@ -48,6 +48,8 @@ def run_model(infile: pathlib.Path):
         dt = pd.Timedelta(seconds=chan.get_dt())
         t += dt
 
+    print()
+
     # write a final step even if not on the frequency
     if (step - 1) % cfg.output.frequency != 0:
         out.write_step(t - dt)
