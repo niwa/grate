@@ -95,7 +95,7 @@ class Channel:
         """Momentum correction factor"""
         return 1
 
-    def d90(self, c: int, loc: Loc):
+    def __d90_del(self, c: int, loc: Loc):
         """90th percentile of the grain diameter.
 
         Referred to in Eq 8.4
@@ -106,22 +106,17 @@ class Channel:
         """
         return self.xss[c].d90(loc)
 
-    def ng(self, c: int, loc: Loc):
+    def __ng_del(self, c: int, loc: Loc):
         """Grain roughness at given chainage"""
         return 0.044 * self.d90(c, loc) ** (1 / 6)
 
-    def nf(self, c: int, h: float, loc: Loc):
+    def __nf_del(self, c: int, h: float, loc: Loc):
         """Form roughness"""
         return self.xss[c].nf(h, loc)
 
     def area(self, c: int, h: float, loc: Loc | None = None):
         """Return area of water between bed and h"""
-        # print(f"Doing area for c={c} h={h} loc={loc}")
         return self.xss[c].area(h, loc)
-
-    def P(self, c: int, h: float, loc: Loc | None = None):
-        """Wetted perimeter at chainage"""
-        return self.xss[c].P(h, loc)
 
     def get_mean_bed_level(self, c: int):
         """Return mean bed level of profile at chainage c
@@ -191,40 +186,9 @@ class Channel:
         self.max_deta_over_dt = max(dys)
         self._set_next_dt()
 
+    def conveyance(self, c: int, d: float):
+        return self.xss[c].conveyance(d)
 
-class Flume(Channel):
-    def __init__(self, cfg: GrateConfig):
-        super().__init__(cfg)
-        self.active_layer_thickness = np.full(self.nc, self._cfg.morphological.la)
-        self.storage_layer_thickness = np.full(self.nc, self._cfg.morphological.layer)
-
-    def d90(self, c: int):
-        """90 percentile of grain diameter of surface layer."""
-        _ = c
-        # FIXME
-        return self._cfg.bankd90
-
-    def nf(self, c: int, h: float):
-        """Form roughness
-
-        formrf * width + wallrf * 2h
-        -------------------------------
-            width + 2h
-        """
-        xs = self.xss[c]
-        B = xs.Bwet(h)
-        return (xs.get_formrf() * B + 2 * xs.get_wallrf() * h) / (B + 2 * h)
-
-
-class River(Channel):
-    def nf(self, c: int, h: float):
-        """Form roughness
-
-        nfc * sum_k (r_k * p_k) / pc
-
-        where nfc is default form roughness of cross-section
-        rk and pk are relative roughness factory wetted perimeter FIXME
-        pc FIXME
-
-        """
-        raise NotImplementedError(f"nf({c} {h})")
+    def R(self, c: int, d: float):
+        """Hydraulic radius A/P over entire xsection"""
+        return self.xss[c].R(d)

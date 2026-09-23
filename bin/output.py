@@ -38,6 +38,7 @@ class Output:
 
         # first step is written with xarray
         self._initialised = False
+        self._epoch = None
 
     def _get_depth(self):
         return self._hmodel.d.copy()
@@ -135,11 +136,17 @@ class Output:
 
         # Use xarray to make first file
         if not self._initialised:
+            self._epoch = np.datetime64(t)
             ds = xr.Dataset(
                 data_vars={
                     v: fun().expand_dims(time=[t]) for v, fun in self._v2da.items()
                 }
             )
+            ds["time"].encoding = {
+                "units": f"seconds since {self._epoch}",
+                "calendar": "proleptic_gregorian",
+                "dtype": "int64",
+            }
             ds.to_netcdf(
                 self._outfile, mode="w", engine="h5netcdf", unlimited_dims=["time"]
             )
@@ -149,7 +156,11 @@ class Output:
         with h5py.File(self._outfile, "r+") as f:
             n = f["time"].shape[0]
             f["time"].resize((n + 1,))
-            f["time"][n] = np.datetime64(t)
+            # f["time"][n] = np.datetime64(t)
+            f["time"][n] = int(
+                (np.datetime64(t) - self._epoch) / np.timedelta64(1, "s")
+            )
+
             for v, fun in self._v2np.items():
                 dset = f[v]
                 dset.resize((n + 1,) + dset.shape[1:])

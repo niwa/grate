@@ -63,11 +63,11 @@ class HydroDynamicModel:
             d = self.d[c]
         return self.Q(t, c) / self.A(c, d)
 
-    def ng(self, c: int, loc: Loc):
+    def __ng_del(self, c: int, loc: Loc):
         """Grain roughness"""
         return self._channel.ng(c, loc)
 
-    def nf(self, c: int, d: float, loc: Loc):
+    def __nf_del(self, c: int, d: float, loc: Loc):
         """Form roughness"""
         return self._channel.nf(c, d, loc)
 
@@ -85,31 +85,26 @@ class HydroDynamicModel:
         """
         if d is None:
             d = self.d[c]
+        return self._channel.conveyance(c, d)
 
-        K = 0
-        for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT):
-            A = self.A(c, d, loc)
-            P = self.P(c, d, loc)
-            if P == 0:
-                # no water in this part of channel
-                continue
-            R = A / P
-            K += A * R ** (2 / 3) / (self.ng(c, loc) + self.nf(c, d, loc))
-
-        assert K > 0, "No water"
-
-        return K
+        # K = 0
+        # for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT):
+        #     A = self.A(c, d, loc)
+        #     P = self.P(c, d, loc)
+        #     if P == 0:
+        #         # no water in this part of channel
+        #         continue
+        #     R = A / P
+        #     K += A * R ** (2 / 3) / (self.ng(c, loc) + self.nf(c, d, loc))
+        #
+        # assert K > 0, "No water"
+        #
+        # return K
 
     def Sf(self, t: pd.Timestamp, c: int, d: float | None = None):
         """Return friction slope, ie. Q abs(Q) / K^2"""
         Q = self.Q(t, c)
         return Q * abs(Q) / self.conveyance(c, d) ** 2
-
-    def P(self, c: int, d: float | None = None, loc: Loc | None = None):
-        """Wetted perimeter at chainage"""
-        if d is None:
-            d = self.d[c]
-        return self._channel.P(c, d, loc)
 
     def S0(self, c: int):
         """Bed slope at c"""
@@ -125,7 +120,7 @@ class HydroDynamicModel:
         """Hydraulic radius A/P over entire xsection"""
         if d is None:
             d = self.d[c]
-        return self.A(c, d) / self.P(c, d)
+        return self._channel.R(c, d)
 
     def update_depth(self):
         raise NotImplementedError()

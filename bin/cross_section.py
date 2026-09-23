@@ -215,7 +215,7 @@ class CrossSection:
     def grain_stress(self, t: pd.Timestamp, hydro):
         return self.layers.grain_stress(t, hydro)
 
-    @lru_cache(maxsize=None)
+    @lru_cache(maxsize=200)
     def _wetted_segments(self, h: float, loc: Loc | None, min_bed_level: float):
         """Yield roughness, perimeter, width and area for each wetted segment."""
         water_level = min_bed_level + h
@@ -270,25 +270,35 @@ class CrossSection:
         """Return channel width"""
         return self.channel[-1, 0] - self.channel[0, 0]
 
-    def Bwet(self, h: float):
+    def Bwet(self, d: float):
         """Return water surface width for given depth."""
         return sum(
-            w for _, _, w, _ in self._wetted_segments(h, None, self.min_bed_level)
+            w for _, _, w, _ in self._wetted_segments(d, None, self.min_bed_level)
         )
 
-    def P(self, h: float, loc: Loc | None = None):
+    def P(self, d: float, loc: Loc | None = None):
         """Wetted perimeter for given water level."""
         return sum(
-            p for _, p, _, _ in self._wetted_segments(h, loc, self.min_bed_level)
+            p for _, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level)
         )
 
-    def area(self, h: float, loc: Loc | None = None):
+    @lru_cache(maxsize=200)
+    def _P_cached(self, d: float, loc: Loc | None, min_bed_level):
+        """Wetted perimeter for given water level."""
+        return sum(p for _, p, _, _ in self._wetted_segments(d, loc, min_bed_level))
+
+    def area(self, d: float, loc: Loc | None = None):
         """Area of water below this height."""
         return sum(
-            a for _, _, _, a in self._wetted_segments(h, loc, self.min_bed_level)
+            a for _, _, _, a in self._wetted_segments(d, loc, self.min_bed_level)
         )
 
-    def nf(self, h: float, loc: Loc):
+    @lru_cache(maxsize=200)
+    def _area_cached(self, d: float, loc: Loc | None, min_bed_level):
+        """Area of water below this height."""
+        return sum(a for _, _, _, a in self._wetted_segments(d, loc, min_bed_level))
+
+    def nf(self, d: float, loc: Loc):
         """Return form roughness for the wetted cross-section.
 
         formrf * sum_k (r_k * p_k) / P
@@ -301,7 +311,28 @@ class CrossSection:
         peri = 0.0
         weighted_p = 0.0
 
-        for rough, p, _, _ in self._wetted_segments(h, loc, self.min_bed_level):
+        for rough, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level):
+            peri += p
+            weighted_p += rough * p
+
+        # don't need to multiply by formrf since roughness already done that
+        return weighted_p / peri
+
+    @lru_cache(maxsize=200)
+    def _nf_cached(self, d: float, loc: Loc, min_bed_level):
+        """Return form roughness for the wetted cross-section.
+
+        formrf * sum_k (r_k * p_k) / P
+
+        formrf is the default form roughness of cross-section
+        rk and pk are relative roughness and wetted perimeter
+        P is the wetted perimeter
+
+        """
+        peri = 0.0
+        weighted_p = 0.0
+
+        for rough, p, _, _ in self._wetted_segments(d, loc, min_bed_level):
             peri += p
             weighted_p += rough * p
 
@@ -326,3 +357,64 @@ class CrossSection:
 
     def update_alayer_proportions(self, df: np.ndarray):
         self.layers.acfd += df
+
+    def ng(self, loc: Loc):
+        """Grain roughness in left/channel/right"""
+        return 0.044 * self.d90(loc) ** (1 / 6)
+
+    def conveyance(self, d: float):
+        """K conveyance
+
+        sum over left, main, right of
+            A * R^(2/3) / (ng + nf)
+
+        where
+            A is the area
+            R is A/P
+            ng is grain roughness
+            nf is form roughness
+        """
+        return self._conveyance_cached(d, self.min_bed_level)
+
+    @lru_cache(maxsize=200)
+    def _conveyance_cached(self, d: float, min_bed_level: float):
+        """K conveyance
+
+        sum over left, main, right of
+            A * R^(2/3) / (ng + nf)
+
+        where
+            A is the area
+            R is A/P
+            ng is grain roughness
+            nf is form roughness
+        """
+        # FIXME, not sure if ng is cacheable, grainsize distribution...
+        K = 0
+        for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT):
+            A = self._area_cached(d, loc, min_bed_level)
+            P = self._P_cached(d, loc, min_bed_level)
+            if P == 0:
+                # no water in this part of channel
+                continue
+            R = A / P
+            K += (
+                A
+                * R ** (2 / 3)
+                / (self.ng(loc) + self._nf_cached(d, loc, min_bed_level))
+            )
+
+        assert K > 0, "No water"
+
+        return K
+
+    def R(self, d: float):
+        """Hydraulic radius A/P over entire xsection"""
+        return self._R_cached(d, self.min_bed_level)
+
+    @lru_cache(maxsize=200)
+    def _R_cached(self, d: float, min_bed_level: float):
+        """Hydraulic radius A/P over entire xsection"""
+        return self._area_cached(d, None, min_bed_level) / self._P_cached(
+            d, None, min_bed_level
+        )
