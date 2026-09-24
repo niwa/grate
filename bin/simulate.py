@@ -11,6 +11,27 @@ from output import Output
 
 def run_model(infile: pathlib.Path):
 
+    def cache_stats(caches):
+        infos = [cache.cache_info() for cache in caches]
+        hits = sum(x.hits for x in infos)
+        misses = sum(x.misses for x in infos)
+        return {
+            "hit": hits / (hits + misses),
+            "hits": hits,
+            "misses": misses,
+            "currsize": sum(x.currsize for x in infos),
+        }
+
+    def cache_info():
+        q = cache_stats([hmodel.Q])
+        w = cache_stats([xs._wetted_segments for xs in chan.xss])
+        b = cache_stats([xs._Bwet_cached for xs in chan.xss])
+        a = cache_stats([xs._area_cached for xs in chan.xss])
+        c = cache_stats([xs._conveyance_cached for xs in chan.xss])
+        ng = cache_stats([xs.ng for xs in chan.xss])
+
+        return f"Q: {q}\nws {w}\nbw {b}\na  {a}\nc {c}\nng {ng}"
+
     with open(infile) as f:
         cfg = GrateConfig.model_validate(yaml.safe_load(f))
     chan = Channel(cfg)
@@ -43,6 +64,14 @@ def run_model(infile: pathlib.Path):
                     end="",
                     flush=True,
                 )
+
+                # print(
+                #     f"\033[7F"
+                #     f"Approximate steps left... {steps_to_go:,} (at {finish:%H:%M:%S})\n"
+                #     f"Cache:\n{cache_info()}",
+                #     end="",
+                #     flush=True,
+                # )
 
         step += 1
         dt = pd.Timedelta(seconds=chan.get_dt())

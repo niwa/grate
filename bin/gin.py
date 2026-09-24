@@ -88,7 +88,7 @@ class CrossSectionProfile(GrateBase):
 
 class CrossSections(GrateBase):
     formrf: p.StrictFloat  # default form roughness
-    wallrf: p.StrictFloat | None = None  # vertical wall roughness for Flume
+    # wallrf: p.StrictFloat | None = None  # vertical wall roughness for Flume
     profiles: list[CrossSectionProfile]
 
 
@@ -395,13 +395,13 @@ class GrateConfig(GrateBase):
             raise ValueError("chainage_min must be less than chainage_max")
 
     def _check_cross_sections(self):
-        if self.model.channel_type == "flume" and self.cross_sections.wallrf is None:
-            raise ValueError("cross_sections.wallrf is required for flume models")
-        elif (
-            self.model.channel_type != "flume"
-            and self.cross_sections.wallrf is not None
-        ):
-            raise ValueError("cross_sections.wallrf is only valid for flume models")
+        # if self.model.channel_type == "flume" and self.cross_sections.wallrf is None:
+        #     raise ValueError("cross_sections.wallrf is required for flume models")
+        # elif (
+        #     self.model.channel_type != "flume"
+        #     and self.cross_sections.wallrf is not None
+        # ):
+        #     raise ValueError("cross_sections.wallrf is only valid for flume models")
 
         nprof = self.grain_size_profiles.num_profiles
         for cs in self.cross_sections.profiles:

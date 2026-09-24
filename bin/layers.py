@@ -10,6 +10,7 @@ from grainprofile import get_representative_grain_sizes, get_grain_props
 KAPPA = 0.4  #  Von Kalmans constant
 GRAVITY = 9.81
 WATER_DENSITY = 1000
+SAND_SIZE = 0.002  # sand grain size in metres
 
 
 class LayerStack:
@@ -38,8 +39,7 @@ class LayerStack:
             xs.storage_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
         )
 
-        # FIXME, 2 or 0.002 ???
-        self._sand_fraction = self._grain_proportion_small_than(2)
+        self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
 
         self._d90 = self._grain_size_percentile(0.9)
         self._dsm = self._grain_size_percentile(0.5)
@@ -159,7 +159,7 @@ class LayerStack:
 
         return np.exp(-phi)
 
-    def _grain_proportion_small_than(self, x: float):
+    def _grain_proportion_smaller_than(self, x: float):
         """Proportion of grains (over all lith) smaller than given size
 
         Parameters
@@ -247,6 +247,6 @@ class LayerStack:
 
     def add_to_acfd(self, df):
         self._acfd += df
-        self._sand_fraction = self._grain_proportion_small_than(2)
+        self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
         self._dsm = self._grain_size_percentile(0.5)
         self._d90 = self._grain_size_percentile(0.9)

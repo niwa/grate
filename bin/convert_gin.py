@@ -47,7 +47,7 @@ GIN_VALUE_MAPPINGS = {
     }
 }
 SECTIONS_TO_IGNORE = ["display", "hydraulic_calibration", "bed_layer", "active_layer"]
-KEYS_TO_IGNORE = ["VERSID", "OUTXSPARMS"]
+KEYS_TO_IGNORE = ["VERSID", "OUTXSPARMS", "WALLRF"]  # ignore special case flume
 
 
 def ykey(key: str) -> str:
@@ -283,8 +283,8 @@ class XsectTransformer(lark.Transformer):
             "nsect": int(items[0]),
             "formrf": float(items[2]),
         }
-        if len(items) >= 5:
-            r.update({"wallrf": float(items[4])})
+        # if len(items) >= 5:
+        #     r.update({"wallrf": float(items[4])})
         return r
 
     def cross_section(self, items):

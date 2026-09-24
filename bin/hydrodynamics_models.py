@@ -145,9 +145,9 @@ class HydroDynamicModel:
 class QuasiSteadyModel(HydroDynamicModel):
     def initialize(self, t: pd.Timestamp):
         """Set d to initial value."""
-        # get the chain values from channel so we know lengths
-        # FIXME, just starting 0.5m of water depth
-        self.d = np.ones(len(self.cs)) / 2
+        # initialize depth by setting to 1m, then running an update, after
+        # doing downstream
+        self.d = np.ones(len(self.cs))
 
         # if the downstream boundary condition is normal, grab the hinit which
         # is an elevation (need to subtract off
@@ -155,6 +155,8 @@ class QuasiSteadyModel(HydroDynamicModel):
         if "normal" in tv:
             self.d[-1] = tv["normal"]["hinit"]
             self.d[-1] -= self._channel.get_min_bed_level(len(self.cs) - 1)
+
+        self.update_depth(t)
 
     @lru_cache(maxsize=400)
     def Q(self, t: pd.Timestamp, c: int):

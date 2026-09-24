@@ -14,14 +14,18 @@ class Loc(Enum):
 
 
 class CrossSection:
-    """A loaded CrossSectionProfile, includes metadata, xy points, derived props"""
+    """A loaded CrossSectionProfile, includes metadata, xy points, derived props
+
+    Currently handles Flume or River cross sections.  Braided channel will need
+    subclass
+    """
 
     def __init__(
         self,
         xs: CrossSectionProfile,
         cfg: GrateConfig,
         default_formrf,
-        wallrf,
+        # wallrf,
     ):
         self.chainage = xs.chainage
         self.chainidx = None  # this will get filled in when interped
@@ -29,7 +33,7 @@ class CrossSection:
         self.river_name = xs.river_name
 
         self.formrf = xs.formrf if xs.formrf is not None else default_formrf
-        self.wallrf = wallrf
+        # self._wallrf_del = wallrf
 
         self.bankd90 = xs.bankd90
         self.bedrock_rl = xs.bedrock_rl
@@ -103,7 +107,7 @@ class CrossSection:
         cs.river_name = self.river_name if f < 0.5 else other.river_name
 
         cs.formrf = interp(self.formrf, other.formrf, f)
-        cs.wallrf = interp(self.wallrf, other.wallrf, f)
+        # cs._wallrf_del = interp(self._wallrf_del, other._wallrf_del, f)
         cs.bankd90 = interp(self.bankd90, other.bankd90, f)
         cs.bedrock_rl = interp(self.bedrock_rl, other.bedrock_rl, f)
         cs.qsfact = interp(self.qsfact, other.qsfact, f)
@@ -119,11 +123,10 @@ class CrossSection:
         df["y"] += target_bed - source.mean_bed_level
         cs._set_points(df)
         cs.layers = source.layers.interpolate(other.layers, f, chainidx)
-
         return cs
 
     def d90(self, loc: Loc):
-        if loc == Loc.CHANNEL:
+        if loc == Loc.CHANNEL or self.bankd90 is None:
             return self.layers.get_d90()
         else:
             return self.bankd90
@@ -136,13 +139,6 @@ class CrossSection:
 
         Each array has columns: x, y, roughness.
         """
-
-        # FIXME, can remove after a while when I've remembered what is allowed
-        # in profile csv
-        assert set(df.columns) <= {"x", "y", "roughness", "ob"}, (
-            f"Unexpected profile columns: "
-            f"{sorted(set(df.columns) - {'x', 'y', 'roughness', 'ob'})}"
-        )
 
         if "ob" not in df.columns:
             data = df[["x", "y", "roughness"]].to_numpy()
@@ -209,7 +205,7 @@ class CrossSection:
     def grain_stress(self, t: pd.Timestamp, hydro):
         return self.layers.grain_stress(t, hydro)
 
-    @lru_cache(maxsize=400)
+    @lru_cache(maxsize=1000)
     def _wetted_segments(self, h: float, loc: Loc | None, min_bed_level: float):
         """Yield roughness, perimeter, width and area for each wetted segment."""
         water_level = min_bed_level + h
@@ -266,26 +262,29 @@ class CrossSection:
 
     def Bwet(self, d: float):
         """Return water surface width for given depth."""
-        return sum(
-            w for _, _, w, _ in self._wetted_segments(d, None, self.min_bed_level)
-        )
-
-    @lru_cache(maxsize=400)
-    def _P_cached(self, d: float, loc: Loc | None, min_bed_level):
-        """Wetted perimeter for given water level."""
-        return sum(p for _, p, _, _ in self._wetted_segments(d, loc, min_bed_level))
+        return self._Bwet_cached(d, self.min_bed_level)
 
     def area(self, d: float, loc: Loc | None = None):
         """Area of water below this height."""
         return self._area_cached(d, loc, self.min_bed_level)
 
-    @lru_cache(maxsize=400)
+    @lru_cache(maxsize=1000)
+    def _Bwet_cached(self, d: float, min_bed_level):
+        """Return water surface width for given depth."""
+        return sum(w for _, _, w, _ in self._wetted_segments(d, None, min_bed_level))
+
+    @lru_cache(maxsize=1000)
     def _area_cached(self, d: float, loc: Loc | None, min_bed_level):
         """Area of water below this height."""
         return sum(a for _, _, _, a in self._wetted_segments(d, loc, min_bed_level))
 
-    @lru_cache(maxsize=400)
-    def _nf_cached(self, d: float, loc: Loc, min_bed_level):
+    def _P(self, d: float, loc: Loc | None):
+        """Wetted perimeter for given water level."""
+        return sum(
+            p for _, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level)
+        )
+
+    def _nf(self, d: float, loc: Loc | None):
         """Return form roughness for the wetted cross-section.
 
         formrf * sum_k (r_k * p_k) / P
@@ -298,7 +297,7 @@ class CrossSection:
         peri = 0.0
         weighted_p = 0.0
 
-        for rough, p, _, _ in self._wetted_segments(d, loc, min_bed_level):
+        for rough, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level):
             peri += p
             weighted_p += rough * p
 
@@ -319,11 +318,16 @@ class CrossSection:
             nbins x nlith 2d array.  (j, li) element is bed transport for li
             lith group and j proportion size
         """
-        return self.layers.qb_jli(t, hydro) * self.Bwet(hydro.d[self.chainidx])
+        return self.layers.qb_jli(t, hydro) * self._Bwet_cached(
+            hydro.d[self.chainidx], self.min_bed_level
+        )
 
     def update_alayer_proportions(self, df: np.ndarray):
         self.layers.add_to_acfd(df)
+        # the ng cache needs invalidating since acfd change means d90 changes
+        self.ng.cache_clear()
 
+    @lru_cache(maxsize=1000)
     def ng(self, loc: Loc):
         """Grain roughness in left/channel/right"""
         return 0.044 * self.d90(loc) ** (1 / 6)
@@ -340,10 +344,14 @@ class CrossSection:
             ng is grain roughness
             nf is form roughness
         """
-        return self._conveyance_cached(d, self.min_bed_level)
+        return self._conveyance_cached(
+            d,
+            (self.ng(Loc.LEFT), self.ng(Loc.CHANNEL), self.ng(Loc.RIGHT)),
+            self.min_bed_level,
+        )
 
-    @lru_cache(maxsize=400)
-    def _conveyance_cached(self, d: float, min_bed_level: float):
+    @lru_cache(maxsize=1000)
+    def _conveyance_cached(self, d: float, ngs: tuple, min_bed_level: float):
         """K conveyance
 
         sum over left, main, right of
@@ -354,21 +362,19 @@ class CrossSection:
             R is A/P
             ng is grain roughness
             nf is form roughness
+
+        Need to pass in the ngs since they might change without d or
+        min_bed_level changing because acfd (and then d90) changes
         """
-        # FIXME, not sure if ng is cacheable, grainsize distribution...
         K = 0
-        for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT):
+        for loc, ng in zip((Loc.LEFT, Loc.CHANNEL, Loc.RIGHT), ngs):
             A = self._area_cached(d, loc, min_bed_level)
-            P = self._P_cached(d, loc, min_bed_level)
+            P = self._P(d, loc)
             if P == 0:
                 # no water in this part of channel
                 continue
             R = A / P
-            K += (
-                A
-                * R ** (2 / 3)
-                / (self.ng(loc) + self._nf_cached(d, loc, min_bed_level))
-            )
+            K += A * R ** (2 / 3) / (ng + self._nf(d, loc))
 
         assert K > 0, "No water"
 
@@ -376,11 +382,4 @@ class CrossSection:
 
     def R(self, d: float):
         """Hydraulic radius A/P over entire xsection"""
-        return self._R_cached(d, self.min_bed_level)
-
-    @lru_cache(maxsize=400)
-    def _R_cached(self, d: float, min_bed_level: float):
-        """Hydraulic radius A/P over entire xsection"""
-        return self._area_cached(d, None, min_bed_level) / self._P_cached(
-            d, None, min_bed_level
-        )
+        return self._area_cached(d, None, self.min_bed_level) / self._P(d, None)

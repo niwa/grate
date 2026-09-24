@@ -5,7 +5,7 @@ from cross_section import CrossSection, Loc
 
 
 class Channel:
-    """Flume, river, braided channel"""
+    """Covers Flume and River.  Braided channel needs a subclass"""
 
     def __init__(self, cfg: GrateConfig):
         self._cfg = cfg
@@ -44,11 +44,11 @@ class Channel:
         xss = {}
 
         formrf = self._cfg.cross_sections.formrf
-        wallrf = self._cfg.cross_sections.wallrf
+        # wallrf = self._cfg.cross_sections.wallrf
 
         for xs in self._cfg.cross_sections.profiles:
             c = xs.chainage
-            xss[c] = CrossSection(xs, self._cfg, formrf, wallrf)
+            xss[c] = CrossSection(xs, self._cfg, formrf)  # , wallrf)
 
         # check min/max chainage
         assert min(xss.keys()) <= self.cs[0], (
