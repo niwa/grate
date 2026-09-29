@@ -49,8 +49,6 @@ class Morphological(GrateBase):
     dk: p.StrictFloat = 2.0
     chi: p.StrictFloat = 0.7
     qthres: p.StrictFloat = 0.0
-    refgsz: p.StrictFloat
-    refnode: p.StrictInt | None = None
     awopt: p.StrictInt | None = None
 
 

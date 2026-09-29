@@ -47,7 +47,7 @@ GIN_VALUE_MAPPINGS = {
     },
 }
 SECTIONS_TO_IGNORE = ["display", "hydraulic_calibration", "bed_layer", "active_layer"]
-KEYS_TO_IGNORE = ["VERSID", "OUTXSPARMS", "WALLRF"]  # ignore special case flume
+KEYS_TO_IGNORE = ["VERSID", "OUTXSPARMS", "WALLRF", "REFGSZ", "REFNODE"]
 
 
 def ykey(key: str) -> str:
