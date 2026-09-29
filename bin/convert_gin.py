@@ -581,8 +581,28 @@ def parse_gin(fname: pathlib.Path) -> dict:
 
     # the optional section headers are surrounded by ! ---, so easier to clean
     # this up first
-    with open(fname, "r", encoding="utf-8-sig") as fh:
-        lines = fh.readlines()
+    try:
+        with open(fname, "r", encoding="utf-8-sig") as fh:
+            lines = fh.readlines()
+    except UnicodeDecodeError as e:
+        # not UTF, some weird windows characters, find where so user can fix
+        with open(fname, "rb") as f:
+            data = f.read()
+
+        pos = e.start
+        line_num = data[:pos].count(b"\n") + 1  # count the newlines up to pos
+        line_start = data.rfind(b"\n", 0, pos) + 1  # start at pos, go backward to \n
+        line_end = data.find(b"\n", pos)  # start at pos and go forward to \n
+
+        if line_end == -1:
+            line_end = len(data)
+        bad_line = data[line_start:line_end]
+        raise ValueError(
+            f"\nFile {fname!s} is not valid UTF-8 at byte {pos}\n"
+            f"Bad line ({line_num}) is {bad_line!r}\n"
+            f"Edit that line and/or convert file using "
+            f"Save As... in Notepad choosing Encoding: UTF-8\n"
+        ) from e
 
     lines = adhoc_fixes(lines)
     lines = replace_section_headers(lines, SECTION_MAPPINGS, sep="=")
