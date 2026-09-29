@@ -12,7 +12,6 @@ class HydroDynamicModel:
     def __init__(self, cfg: GrateConfig, chan: Channel):
         self._cfg = cfg
         self._channel = chan
-        self.dc = self._channel.dc
         self.cs = self._channel._chainpts()
         self.initialize(self._cfg.simulation_time.start)
 
@@ -170,7 +169,7 @@ class QuasiSteadyModel(HydroDynamicModel):
         t: pd.Timestamp
             Time
         """
-        c *= self.dc  # config inflow is in metres
+        c = self.cs[c]  # convert index to chainage
         return sum(
             pi.value_at(t) for pi in self._cfg._processed_inflow if pi.ordinate <= c
         )
@@ -191,6 +190,7 @@ class QuasiSteadyModel(HydroDynamicModel):
         We should have already sorted at c+1
         """
 
+        dc = self.cs[c + 1] - self.cs[c]
         sf = (self.Sf(t, c, d) + self.Sf(t, c + 1)) / 2
         g = 9.8
         f = (
@@ -198,13 +198,14 @@ class QuasiSteadyModel(HydroDynamicModel):
             + (self.beta() * self.u(t, c, d) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
             / (2 * g)
             - self.d[c + 1]
-            + (self.S0(c) - sf) * self.dc
+            + (self.S0(c) - sf) * dc
         )
         return f
 
     def dEdd(self, t: pd.Timestamp, c: int, d: float):
         """Calculate f prime equation 5.9"""
 
+        dc = self.cs[c + 1] - self.cs[c]
         sf = (self.Sf(t, c, d) + self.Sf(t, c + 1)) / 2
         g = 9.8
         B = self.Bwet(c, d)
@@ -212,7 +213,7 @@ class QuasiSteadyModel(HydroDynamicModel):
         fprime = (
             1
             - (self.beta() * B * self.u(t, c, d) ** 2) / (g * A)
-            + sf * (B + 0.667 / self.R(c, d)) * self.dc / A
+            + sf * (B + 0.667 / self.R(c, d)) * dc / A
         )
         return fprime
 

@@ -62,13 +62,6 @@ class Discretisation(GrateBase):
     chainage_max: p.StrictFloat
     max_dc: p.StrictFloat
 
-    @p.computed_field
-    @property
-    def dc(self) -> float:
-        length = self.chainage_max - self.chainage_min
-        num = math.ceil(length / self.max_dc)
-        return length / num
-
 
 class CrossSectionProfile(GrateBase):
     chainage: p.StrictFloat

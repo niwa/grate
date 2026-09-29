@@ -34,8 +34,11 @@ def run_model(infile: pathlib.Path):
 
     with open(infile) as f:
         cfg = GrateConfig.model_validate(yaml.safe_load(f))
+    print("Creating channel...", end="", flush=True)
     chan = Channel(cfg)
+    print("done\nCreating hydromodel...", end="", flush=True)
     hmodel = QuasiSteadyModel(cfg, chan)
+    print("done", flush=True)
     out = Output(cfg, hmodel, chan)
 
     start = cfg.simulation_time.start
@@ -50,28 +53,28 @@ def run_model(infile: pathlib.Path):
         chan.propogate_sediment(t, hmodel)
         steps_to_go = int((end - t) / dt)
 
+        if step > 1 and step % 10 == 0:
+            elapsed = time.perf_counter() - run_start
+            seconds_per_step = elapsed / step
+            seconds_left = steps_to_go * seconds_per_step
+            finish = pd.Timestamp.now() + pd.Timedelta(seconds=seconds_left)
+
+            print(
+                f"\rApproximate steps left... {steps_to_go:,} (at {finish.isoformat(timespec='seconds')})    ",
+                end="",
+                flush=True,
+            )
+
+            # print(
+            #     f"\033[7F"
+            #     f"Approximate steps left... {steps_to_go:,} (at {finish:%H:%M:%S})\n"
+            #     f"Cache:\n{cache_info()}",
+            #     end="",
+            #     flush=True,
+            # )
+
         if step % cfg.output.frequency == 0:
             out.write_step(t)
-
-            if step > 100:
-                elapsed = time.perf_counter() - run_start
-                seconds_per_step = elapsed / step
-                seconds_left = steps_to_go * seconds_per_step
-                finish = pd.Timestamp.now() + pd.Timedelta(seconds=seconds_left)
-
-                print(
-                    f"\rApproximate steps left... {steps_to_go:,} (at {finish.isoformat(timespec='seconds')})    ",
-                    end="",
-                    flush=True,
-                )
-
-                # print(
-                #     f"\033[7F"
-                #     f"Approximate steps left... {steps_to_go:,} (at {finish:%H:%M:%S})\n"
-                #     f"Cache:\n{cache_info()}",
-                #     end="",
-                #     flush=True,
-                # )
 
         step += 1
         dt = pd.Timedelta(seconds=chan.get_dt())

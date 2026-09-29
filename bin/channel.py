@@ -9,7 +9,7 @@ class Channel:
 
     def __init__(self, cfg: GrateConfig):
         self._cfg = cfg
-        self.dc = cfg.discretisation.dc
+        self.max_dc = cfg.discretisation.max_dc
         self.poro = cfg.morphological.poro
         self.cs = self._chainpts()
         self.nc = len(self.cs)
@@ -36,10 +36,16 @@ class Channel:
 
     def _chainpts(self):
         """Return chain points"""
-        d = self._cfg.discretisation
-        c = np.arange(d.chainage_min, d.chainage_max + self.dc / 2, self.dc)
-        c[-1] = d.chainage_max
-        return c
+        c = np.array([xs.chainage for xs in self._cfg.cross_sections.profiles])
+
+        # number of intervals between each chainage
+        gaps = np.diff(c)
+        ints = np.ceil(gaps / self.max_dc).astype(int)
+
+        return np.concatenate(
+            [np.linspace(a, b, n + 1)[:-1] for a, b, n in zip(c[:-1], c[1:], ints)]
+            + [c[-1:]]
+        )
 
     def _get_cross_sections(self) -> dict:
         """Return chainage point to CrossSection at that point"""
@@ -59,8 +65,7 @@ class Channel:
             f"Maximum chainage ({self.cs[-1]}) is more than the maximum cross section chainage"
         )
 
-        # the CrossSections are potentially irregularly spaced and some will
-        # need interplation
+        # some variables in CrossSections might need interpolated values
         CrossSection.resolve_interpolated_properties(xss)
 
         return xss
@@ -125,7 +130,8 @@ class Channel:
         assert c < self.nc - 1, (
             f"Cannot calculate S0({c}), likely because this is the most downstream point"
         )
-        return (self.get_mean_bed_level(c) - self.get_mean_bed_level(c + 1)) / self.dc
+        dc = self.cs[c + 1] - self.cs[c]
+        return (self.get_mean_bed_level(c + 1) - self.get_mean_bed_level(c)) / dc
 
     def Bwet(self, c: int, h: float):
         """Water surface width"""
@@ -144,6 +150,8 @@ class Channel:
         dys = []
 
         for c in range(1, self.nc):
+            dc = self.cs[c] - self.cs[c - 1]
+
             # nbins x nlith rate of sediment coming in from boundary
             bdy_sediment_rate = sum(
                 sb.value_at(t)
@@ -154,7 +162,7 @@ class Channel:
             up_Qb_jli = self.xss[c - 1].Qb_jli(t, hydro) + bdy_sediment_rate
             my_Qb_jli = self.xss[c].Qb_jli(t, hydro)
 
-            fact = self.dt / self.dc / (1 - self.poro) / self.xss[c].Bchan()
+            fact = self.dt / dc / (1 - self.poro) / self.xss[c].Bchan()
             dy = (up_Qb_jli.sum() - my_Qb_jli.sum()) * fact
             self.xss[c].aggrade_bed(dy)
             dys.append(dy)
