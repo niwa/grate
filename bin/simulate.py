@@ -60,7 +60,7 @@ def run_model(infile: pathlib.Path):
                 finish = pd.Timestamp.now() + pd.Timedelta(seconds=seconds_left)
 
                 print(
-                    f"\rApproximate steps left... {steps_to_go:,} (at {finish:%H:%M:%S})    ",
+                    f"\rApproximate steps left... {steps_to_go:,} (at {finish.isoformat(timespec='seconds')})    ",
                     end="",
                     flush=True,
                 )

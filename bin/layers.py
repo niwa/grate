@@ -25,30 +25,35 @@ class LayerStack:
         self.nlith = gs.num_lith
 
         # nlith in length
-        self.abrasion_coeffs = gs.abrasion_coeffs
+        self.abrasion_coeffs = tuple(gs.abrasion_coeffs)
         self.sediment_densities = np.array(gs.sediment_densities)
 
         # nbins in length
         self.rgsizes = get_representative_grain_sizes(gs.grain_size_cfds)
 
         # nbins x nlith
-        self._acfd = get_grain_props(
-            xs.active_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
-        )
-        self._scfd = get_grain_props(
-            xs.storage_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
-        )
+        # if groups are good, we can setup acfd and scfd
+        if xs.active_layer_group != "Interp":
+            self._acfd = get_grain_props(
+                xs.active_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
+            )
+        else:
+            self._acfd = "Interp"
 
-        self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
-
-        self._d90 = self._grain_size_percentile(0.9)
-        self._dsm = self._grain_size_percentile(0.5)
-
-        # phi, representative bin value (Dj) in mm
-        # 2** (( log(bot) + log(top) ) / 2)
+        if xs.storage_layer_group != "Interp":
+            self._scfd = get_grain_props(
+                xs.storage_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
+            )
+        else:
+            self._scfd = "Interp"
 
     def __str__(self):
         return f"Layer {self.chainage=} {self.chainidx=}"
+
+    def _set_grain_props(self):
+        self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
+        self._d90 = self._grain_size_percentile(0.9)
+        self._dsm = self._grain_size_percentile(0.5)
 
     def interpolate(self, other: "LayerStack", f: float, chainidx: int) -> "LayerStack":
         """Return a new layer stack that is interped between me and other"""
@@ -61,18 +66,19 @@ class LayerStack:
         result.nlith = self.nlith
         result.rgsizes = self.rgsizes
 
-        for k in [
-            "abrasion_coeffs",
-            "sediment_densities",
-            "_acfd",
-            "_scfd",
-            "_sand_fraction",
-            "_dsm",
-            "_d90",
-        ]:
+        for k in ["_acfd", "_scfd"]:
             m = np.array(getattr(self, k))
             o = np.array(getattr(other, k))
             setattr(result, k, m + f * (o - m))
+
+        # these are constant
+        result.abrasion_coeffs = self.abrasion_coeffs
+        result.sediment_densities = self.sediment_densities
+
+        # recalculate sand_fraction, dsm and d90, not interpolate
+        result._sand_fraction = result._grain_proportion_smaller_than(SAND_SIZE)
+        result._d90 = result._grain_size_percentile(0.9)
+        result._dsm = result._grain_size_percentile(0.5)
 
         return result
 

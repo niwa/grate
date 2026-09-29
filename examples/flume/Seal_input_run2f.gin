@@ -1,0 +1,239 @@
+
+
+
+! =======================================================================
+! Input File Version Identifier (optional)
+! =======================================================================
+VERSID = 3.61
+! =======================================================================
+! Run Identifier - note output is written to file <s>.out
+! =======================================================================
+  RUNID = Seal et al Run 2F
+  
+! =======================================================================
+! Model Type
+!   1 = rectangular flume (4 point cross-section)
+!   2 = single thread river or waterway (variable point cross-section)
+!   3 = braided channel (variable point cross-section, gamma distributed shear stress)
+!   4 = braided channel (variable point cross-section, cross-channel integration of transport, shear stress 
+!          based on local depth)
+!
+  MODELTYPE = 1
+
+! =======================================================================
+! Simulation Time 
+! =======================================================================
+  TS = 20000101 000000		! Start time in ISO format (yyyymmdd hhmmss)
+  TE = 20000102 082400		! End time in ISO format (yyyymmdd hhmmss)
+  NO_CYCLES = 1      		! Number of cycles of time interval (TS - TE) to process     (default = 1)
+  MAX_DT_QS = 2    		! Maximum time increment in secs  (Quasi-steady run) 
+  MAX_DT_FD = 2    		! Maximum time increment in secs (Fully Dynamic run)
+  MAX_DX = 1          		! Maximum spatial increment in metres
+  CDT = 0.01                		! Measure of permissible BL change over DT (m)
+                          		! DT(t+1) = min(CDT/MAX_DETA_OVER_DT(t), MAX_DT)
+  MAX_DQ_OVER_DT = 0.01	! Maximum increase in q over a time increment 
+                              ! over the computational grid (used to switch between quasi-Steady and
+                              ! fully dynamic computation in the combined computation option)        
+! =======================================================================
+! Morphological Parameters
+! =======================================================================
+  LAYER = 0.05           	! Layer thickness (m) - Storage Layer
+  LA = 0.05                	 ! Layer thickness (m) - Active Layer
+  NBS = 5               	! No of layers below the initial surface
+  PORO = 0.3            	!Porosity
+ !
+ALPHA_S = 0.8      	! Non-equilibrium adaptation coefficient (Armanini & De Silvio, 1988)
+!                                   	! (note, this is used to scale the non-equilibrium adaptation length
+!                        	! applicable to the suspended sediment)
+  NEQAL = -1    	! Bed-load Non-equilibrium adaptation length option – use default 
+ 	! calculation based on model type.
+  
+DK = 2               	! Roughness height/static d90 (for determining equivalent sand grain roughness)  
+  CHI = 0.7         		     ! Weighting given to bedload in determining the interface distribution used 
+!			       during deposition,
+!                                                         FI = CHI*P + (1-CHI)*F  (default = 0.7) 
+
+ QTHRES = 0.0                       ! Threshold flow below which no ST occurs and a longer time-step (20x) is
+!                                                  appied
+  REFGSZ =  0.00032      	! Reference grain-size for dimensionless shear stress display (m)
+  REFNODE = 16     	! Computation node at which outputs are calculated (default = last node)
+
+! =======================================================================
+! Discretisation Parameters
+! =======================================================================
+  THETA = 0.6          	! spatial weighting coefficient in HD Scheme (fully dynamic only - Default=0.6)
+  THETA_S = 0.8      	! spatial weighting coefficient in ST Scheme (non-equilibrium only - Default = 0.8)
+  PSI_S = 1.0         	 ! temporal weighting coefficient in ST Scheme (non-equilibrium only - Default = 1.0)
+
+
+! =======================================================================
+! Bed Layer Setup
+! =======================================================================
+! BLOPT = 1               	!  Initialise with constant slope bed layers
+!                         	! parallel to a reference profile through (X(1),Y(1))
+!                          	! and of slope (Y(1)-Y(NNODES))/(X(NNODES)-X(1))
+!                          	! GS Profile below reference profile = DEFSTGRP
+!                          	! GS Profile above reference profile from
+!                          	! initial bed elevation table.
+!
+! BLOPT = 2                	! Initialise with variable slope bed layers parallel
+!                          	! to the initial bed.  GS Profiles set from the
+!                         	 ! initial bed elevation table
+! -----------------------------------------------------------------------------
+BLOPT = 2
+! =======================================================================
+! Active Layer Setup
+! =======================================================================
+! ALOPT = 1                	! Active layer thickness is constant (=LA)
+! ALOPT = 2                	! Active layer thickness is determined dynamically
+!                          	! (experimental)
+! -----------------------------------------------------------------------------
+ALOPT = 1
+
+! =======================================================================
+! CROSS - SECTIONS
+! =======================================================================
+
+XSECTFILE = Seal_Xsects.dat
+
+!
+!
+! =======================================================================
+! Inflow Boundary Conditions
+! =======================================================================
+  NQBC = 1        ! No of Flow Boundary conditions (one at X0 is essential)
+!
+! Tabulated Flow Inputs
+!   XC = streamwise ordinate of flow input
+!   CODE = code for type if input ('C' for constant, 'TS' for timeseries
+!   VALUE =
+!     if CODE = 'C'  flow  (m3/s)
+!     if CODE = 'TS' filename of time-series file
+!
+! XC CODE VALUE
+
+0    C   0.049     
+     
+! =======================================================================
+! Downstream Water Level Boundary Condition (applied at Maximum Chainage)
+! =======================================================================
+!
+! Tabulated Inputs
+!   CODE = code for type if input ('C' for constant, 'TS' for timeseries, 'N' for normal depth
+!   VALUE =
+!     if CODE = 'C' ,  water elevation  (m)
+!     if CODE = 'TS',  filename of time-series of water surface elevation (m)
+!     if CODE = 'N' ,  slope  init_h
+!!
+! CODE VALUE
+
+    C  0.43 	
+
+! =======================================================================
+! Sediment Inflow Boundary Conditions
+! =======================================================================
+  NSBC = 1        ! No of Sediment Boundary conditions (one at X0 is essential)
+!
+! Tabulated Sediment Inputs
+!   XC = streamwise ordinate of sediment feed rate input
+!   CODE = code for type if input ('C' for constant, 'TS' for timeseries
+!   GRP = Grain-size profile number 
+!   FACT = a scaling factor applied to qsed (TS only)
+!
+!   VALUE =
+!     if CODE = 'C'  sediment feed rate (kg/s)
+!     if CODE = 'TS' filename of time-series file
+!
+!
+0    C 2 0.089     !This is the adjusted feed as per Table 1, Cui, 2006,  WRR Vol 43
+!
+
+! =======================================================================
+! Grain-Size Profiles
+! =======================================================================
+!
+  NGRP = 2     	! no of Grain size profiles
+  NGSZ = 20	! no of grain size fractions
+  NLITH = 1   	! no of lithology groups
+! -----------------------------------------------------------------------------
+!
+! -----------------------------------------------------------------------------
+! Abrasion Coefficent
+! -----------------------------------------------------------------------------
+!                     
+! ABRASION_COEFF    ! enter NLITH values in free format (0 = no abrasion)
+0
+! 
+! SEDIMENT_DENSITY    ! enter NLITH values in free format (t/m3)  (should be constant across
+! lithologies at present)
+2.65 
+!  ------- Grain Size Profiles ------------------------------ 
+! gsz    %Finer    %Finer
+0.0625 	0  	0.0
+0.125	0  	2.5
+0.18	50  	5.9
+0.25	100  	11.1
+0.35  	100  	17.1
+0.50	100  	22.2
+0.71	100  	26.4
+1.00	100  	29.9
+1.41	100  	32.4
+2.0	100  	34.4
+2.8	100  	40.4
+4.0	100  	49
+5.7	  100  	55.8
+8.0	  100  	61.8
+11.3	  100  	68.5
+16.0	  100  	76.9
+22.6	100  	86.6
+32.0	100  	92.9
+45.3	100  	96
+64.0	100  	99.9
+90.5	100  	100 
+! -----------------------------------------------------------------------------------
+! Specifiy lithology fractions for each grain size and group (percentage, not cumulative)
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+        1        100.00       100.00
+!
+! =======================================================================
+! Print Options
+! =======================================================================
+  NPRTF = 100  ! print output every NPRTF*DT secs    (default = 300)
+  OUTXSPARMS = 0  ! Flag to enable output of cross-section information 
+                                                         !  (outxsparms: 0=Disable;1=Enable)
+  
+  
+! =======================================================================
+! Display Options
+! =======================================================================
+  SedAccum = 1             ! Units of sediment accumulator display (0=kt, 1=kg)
+  ProfYAxisLimitsAuto = 0      	 ! Automatically set limits to Y axis in Profile plot (0/1 = No/Yes,  Default=Yes)
+  ProfYmax = 1      	! Manual override for ymax (only used if ProfYLimitsAuto=0)
+  ProfYmin = -0.5     	 ! Manual override for ymin (only used if ProfYLimitsAuto=0)
+  ProfYint = 0.5      	! Manual override for y-interval (only used if ProfYLimitsAuto=0)   
+!
+! =======================================================================
+! Hydraulic calibration data: bankful level, water surface profiles 
+! - for plotting purposes only
+! =======================================================================
+!
+NCALIB = 0		! Number of profiles
+NCALPTS =0 		' Number of points in each profile

@@ -13,6 +13,11 @@ class Loc(Enum):
     RIGHT = "right"
 
 
+# properties that might be undefined and need interpolating
+XS_INTERP_PROPS = ["formrf", "bankd90", "bedrock_rl", "qsfact", "lsf"]
+LA_INTERP_PROPS = ["_acfd", "_scfd"]
+
+
 class CrossSection:
     """A loaded CrossSectionProfile, includes metadata, xy points, derived props
 
@@ -32,16 +37,17 @@ class CrossSection:
         self.topoid = xs.topoid
         self.river_name = xs.river_name
 
+        # might be "Interp" in which case we need to interpolate from neighbours
         self.formrf = xs.formrf if xs.formrf is not None else default_formrf
-        # self._wallrf_del = wallrf
-
         self.bankd90 = xs.bankd90
         self.bedrock_rl = xs.bedrock_rl
         self.qsfact = xs.qsfact
         self.lsf = xs.lsf
 
         self.df = pd.read_csv(xs.profile)
-        self._set_points(self.df)
+
+        # can't set points yet since above variables might not be set
+        # self._set_points(self.df)
 
         self.layers = LayerStack(xs, cfg)
 
@@ -49,6 +55,63 @@ class CrossSection:
         return (
             f"CrossSection at chainage={self.chainage} (idx={self.chainidx})\n{self.df}"
         )
+
+    @classmethod
+    def resolve_interpolated_properties(cls, xss: dict):
+        """Resolve properties marked 'Interp' using neighbouring cross sections."""
+
+        cs = sorted(xss)
+
+        def interp(cidx: int, prop: str, attr: str | None = None):
+            """Interpolate at chainidx the given property.
+
+            with attr == "layers" we are working on xs.layers
+            """
+
+            def get_obj(xs):
+                return getattr(xs, attr) if attr else xs
+
+            i = cs.index(cidx)
+
+            left = None
+            for c in reversed(cs[:i]):
+                val = getattr(get_obj(xss[c]), prop)
+                if not (isinstance(val, str) and val == "Interp"):
+                    left = c
+                    break
+
+            right = None
+            for c in cs[i + 1 :]:
+                val = getattr(get_obj(xss[c]), prop)
+                if not (isinstance(val, str) and val == "Interp"):
+                    right = c
+                    break
+
+            if left is None or right is None:
+                raise ValueError(
+                    f"Can't interp {prop!r} at chainage {cidx}: no valid cross-sections"
+                )
+
+            left_value = getattr(get_obj(xss[left]), prop)
+            right_value = getattr(get_obj(xss[right]), prop)
+
+            f = (cidx - left) / (right - left)
+
+            return left_value + f * (right_value - left_value)
+
+        for c in cs:
+            for prop in XS_INTERP_PROPS:
+                if getattr(xss[c], prop) == "Interp":
+                    setattr(xss[c], prop, interp(c, prop))
+
+            for prop in LA_INTERP_PROPS:
+                val = getattr(xss[c].layers, prop)
+                if isinstance(val, str) and val == "Interp":
+                    setattr(xss[c].layers, prop, interp(c, prop, "layers"))
+
+        for xs in xss.values():
+            xs._set_points(xs.df)
+            xs.layers._set_grain_props()
 
     def _set_points(self, df):
         """Set profile points and calculate derived properties."""

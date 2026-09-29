@@ -74,15 +74,19 @@ class CrossSectionProfile(GrateBase):
     chainage: p.StrictFloat
     topoid: str
     river_name: str
-    formrf: p.StrictFloat | None = (
+    formrf: typing.Literal["Interp"] | p.StrictFloat | None = (
         None  # override default roughness, can * by relrf in csv
     )
-    bankd90: p.StrictFloat | None = None
-    active_layer_group: p.StrictInt = p.Field(ge=1)
-    storage_layer_group: p.StrictInt = p.Field(ge=1)
-    bedrock_rl: p.StrictFloat | None = None
-    qsfact: p.StrictFloat | None = None
-    lsf: p.StrictFloat | None = None
+    bankd90: typing.Literal["Interp"] | p.StrictFloat | None = None
+    active_layer_group: (
+        typing.Literal["Interp"] | typing.Annotated[p.StrictInt, p.Field(ge=1)]
+    )
+    storage_layer_group: (
+        typing.Literal["Interp"] | typing.Annotated[p.StrictInt, p.Field(ge=1)]
+    )
+    bedrock_rl: typing.Literal["Interp"] | p.StrictFloat | None = None
+    qsfact: typing.Literal["Interp"] | p.StrictFloat | None = None
+    lsf: typing.Literal["Interp"] | p.StrictFloat | None = None
     profile: pathlib.Path
 
 
@@ -144,7 +148,9 @@ class RuntimeInflowBoundary:
 @dataclass
 class RuntimeDownstreamBoundary:
     type: str
-    value: float | pd.Series
+    value: float | pd.Series | None = None
+    slope: float | None = None
+    hinit: float | None = None
 
     def value_at(self, t: pd.Timestamp) -> dict:
         if self.type in ("elevation", "depth"):
@@ -155,16 +161,16 @@ class RuntimeDownstreamBoundary:
 
         s = self.value
         if t in s.index:
-            return float(s.loc[t])
+            return {"elevation": float(s.loc[t])}
 
         # have to interpolate
         pos = s.index.searchsorted(t)
 
         # bounds check
         if pos == 0:
-            return float(s.iloc[0])
+            return {"elevation": float(s.iloc[0])}
         if pos == len(s):
-            return float(s.iloc[-1])
+            return {"elevation": float(s.iloc[-1])}
 
         t0 = s.index[pos - 1]
         t1 = s.index[pos]
@@ -175,7 +181,7 @@ class RuntimeDownstreamBoundary:
 
 
 class DownstreamBoundaryTS(GrateBase):
-    type: typing.Literal["elevation_timeseries"]
+    type: typing.Literal["ts"]
     value: pathlib.Path
 
 
@@ -218,7 +224,7 @@ class SedimentBoundaryTS(GrateBase):
     ordinate: p.StrictFloat
     group: p.StrictInt
     scale: p.StrictFloat
-    fname: pathlib.Path
+    value: pathlib.Path
 
 
 # class SedimentBoundaryRC(GrateBase):
@@ -274,12 +280,12 @@ class RuntimeSedimentBoundary(RuntimeInflowBoundary):
 class SedimentExtraction(GrateBase):
     ordinate: p.StrictFloat
     type: str
-    fname: pathlib.Path
+    value: pathlib.Path
 
 
 class SedimentRipping(GrateBase):
     ordinate: p.StrictFloat
-    fname: pathlib.Path
+    value: pathlib.Path
 
 
 class GrainSizeProfiles(GrateBase):
@@ -405,11 +411,11 @@ class GrateConfig(GrateBase):
 
         nprof = self.grain_size_profiles.num_profiles
         for cs in self.cross_sections.profiles:
-            if cs.active_layer_group > nprof:
+            if cs.active_layer_group != "Interp" and cs.active_layer_group > nprof:
                 raise ValueError(
                     f"cross_sections.active_layer_group ({cs.active_layer_group}) must be <= number of grain size profiles ({nprof})"
                 )
-            if cs.storage_layer_group > nprof:
+            if cs.storage_layer_group != "Interp" and cs.storage_layer_group > nprof:
                 raise ValueError(
                     f"cross_sections.storage_layer_group ({cs.storage_layer_group}) must be <= number of grain size profiles ({nprof})"
                 )
@@ -463,13 +469,20 @@ class GrateConfig(GrateBase):
 
     def _load_downstream_boundary(self):
         b = self.downstream_boundary
-        val = b.value
-        if b.type == "ts":
-            val = pd.read_csv(val, index_col=0, parse_dates=True)["flow"].sort_index()
-        self._processed_downstream_boundary = RuntimeDownstreamBoundary(
-            type=b.type,
-            value=val,
-        )
+        if b.type == "normal":
+            self._processed_downstream_boundary = RuntimeDownstreamBoundary(
+                type=b.type, slope=b.slope, hinit=b.hinit
+            )
+        else:
+            val = b.value
+            if b.type == "ts":
+                val = pd.read_csv(val, index_col=0, parse_dates=True)[
+                    "flow"
+                ].sort_index()
+            self._processed_downstream_boundary = RuntimeDownstreamBoundary(
+                type=b.type,
+                value=val,
+            )
 
     def _load_sediment_boundary_timeseries(self):
         self._processed_sediment_boundary.clear()

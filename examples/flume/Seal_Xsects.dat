@@ -1,0 +1,33 @@
+NSECT = 2 			 ! No. of cross-sections (Max = 201)
+FORMRF = 0.00		 ! Default segmental form roughness (manning's n)
+WALLRF = 0.009
+Feb-2008
+Seal Bed
+0
+FORMRF
+0.015
+STORAGE 
+1    1
+BEDROCK RL
+-1.0
+PROFILE
+0 1.5
+0 0.09
+0.305 0.09
+0.305 1.5
+***
+Feb-2008
+Seal Bed
+45
+FORMRF
+0.015
+STORAGE 
+1    1
+BEDROCK RL
+-1.0
+PROFILE
+0 1.5
+0 0
+0.305 0
+0.305 1.5
+***  

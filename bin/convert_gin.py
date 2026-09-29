@@ -44,7 +44,7 @@ GIN_VALUE_MAPPINGS = {
         "1": "flume",
         "2": "river",
         "4": "braided_channel",
-    }
+    },
 }
 SECTIONS_TO_IGNORE = ["display", "hydraulic_calibration", "bed_layer", "active_layer"]
 KEYS_TO_IGNORE = ["VERSID", "OUTXSPARMS", "WALLRF"]  # ignore special case flume
@@ -108,16 +108,16 @@ def parse_section_line(section, line, kv, bdir):
             kv.setdefault("inflow_boundary", [])
             parse_inflow_boundary_line(line, kv["inflow_boundary"], bdir)
         case "downstream_boundary":
-            parse_downstream_boundary_line(line, kv)
+            parse_downstream_boundary_line(line, kv, bdir)
         case "sediment_boundary":
             kv.setdefault("sediment_boundary", [])
-            parse_sediment_boundary_line(line, kv["sediment_boundary"])
+            parse_sediment_boundary_line(line, kv["sediment_boundary"], bdir)
         case "sediment_extraction":
             kv.setdefault("sediment_extraction", [])
-            parse_sediment_extraction_line(line, kv["sediment_extraction"])
+            parse_sediment_extraction_line(line, kv["sediment_extraction"], bdir)
         case "sediment_ripping":
             kv.setdefault("sediment_ripping", [])
-            parse_sediment_ripping_line(line, kv["sediment_ripping"])
+            parse_sediment_ripping_line(line, kv["sediment_ripping"], bdir)
         case "grain_size_profiles":
             kv.setdefault("grain_size_profiles", "")
             if not re.match(r"^\s*!", line):
@@ -164,13 +164,13 @@ def parse_inflow_boundary_line(line, kv, bdir):
         Base path that .dat files etc are relative to
     """
 
-    ma = re.match(r"(\d+)\s+(C|TS)\s+(.*)", line, re.I)
+    ma = re.match(r"\s*(\d+\.*\d+)\s+(C|TS)\s+(.*)", line, re.I)
     if not ma:
         return
     if ma.group(2).lower() == "c":
         kv.append(
             {
-                "ordinate": int(ma.group(1)),
+                "ordinate": float(ma.group(1)),
                 "type": "const",
                 "value": float(ma.group(3)),
             }
@@ -183,14 +183,14 @@ def parse_inflow_boundary_line(line, kv, bdir):
         convert_timeseries(infile, outfile)
         kv.append(
             {
-                "ordinate": int(ma.group(1)),
+                "ordinate": float(ma.group(1)),
                 "type": "ts",
                 "value": str(fname.with_suffix(".csv")),
             }
         )
 
 
-def parse_downstream_boundary_line(line, kv):
+def parse_downstream_boundary_line(line, kv, bdir):
     ma = re.match(r"\s*(C|D|TS)\s+(\S+)|^\s*(N)\s+(\S+)\s+(\S+)", line, re.I)
     if not ma:
         return
@@ -199,9 +199,14 @@ def parse_downstream_boundary_line(line, kv):
     elif ma.group(1) and ma.group(1).lower() == "d":
         kv["downstream_boundary"] = {"type": "depth", "value": float(ma.group(2))}
     elif ma.group(1) and ma.group(1).lower() == "ts":
+        # full paths for conversion
+        fname = pathlib.Path(PureWindowsPath(ma.group(2)))
+        infile = bdir / fname
+        outfile = infile.with_suffix(".csv")
+        convert_timeseries(infile, outfile)
         kv["downstream_boundary"] = {
-            "type": "elevation_timeseries",
-            "value": ma.group(2),
+            "type": "ts",
+            "value": str(fname.with_suffix(".csv")),
         }
     else:
         kv["downstream_boundary"] = {
@@ -211,36 +216,41 @@ def parse_downstream_boundary_line(line, kv):
         }
 
 
-def parse_sediment_boundary_line(line, kv):
-    ma = re.match(r"(\d+)\s+RC", line, re.I)
+def parse_sediment_boundary_line(line, kv, bdir):
+    ma = re.match(r"\s*(\d+\.*\d+)\s+RC", line, re.I)
     if ma:
-        kv.append({"ordinate": int(ma.group(1)), "type": "rc"})
+        kv.append({"ordinate": float(ma.group(1)), "type": "rc"})
         return
-    ma = re.match(r"(\d+)\s+C\s+(\d+)\s+(\S+)", line, re.I)
+    ma = re.match(r"\s*([\.\d]+)\s+C\s+(\d+)\s+(\S+)", line, re.I)
     if ma:
         kv.append(
             {
-                "ordinate": int(ma.group(1)),
+                "ordinate": float(ma.group(1)),
                 "type": "const",
                 "group": int(ma.group(2)),
                 "value": float(ma.group(3)),
             }
         )
         return
-    ma = re.match(r"(\d+)\s+TS\s+(\d+)\s+(\S+)\s+(\S+)", line, re.I)
+    ma = re.match(r"\s*(\d+\.*\d+)\s+TS\s+(\d+)\s+(\S+)\s+(\S+)", line, re.I)
     if ma:
+        # full paths for conversion
+        fname = pathlib.Path(PureWindowsPath(ma.group(4)))
+        infile = bdir / fname
+        outfile = infile.with_suffix(".csv")
+        convert_timeseries(infile, outfile)
         kv.append(
             {
-                "ordinate": int(ma.group(1)),
+                "ordinate": float(ma.group(1)),
                 "type": "ts",
                 "group": int(ma.group(2)),
                 "scale": float(ma.group(3)),
-                "fname": ma.group(4),
+                "value": str(fname.with_suffix(".csv")),
             }
         )
 
 
-def parse_sediment_extraction_line(line, kv):
+def parse_sediment_extraction_line(line, kv, bdir):
     ma = re.match(r"\s*(\d+\.*\d+)\s+C\s+(\S+)\s+(\S+)", line, re.I)
     if ma:
         kv.append(
@@ -254,20 +264,30 @@ def parse_sediment_extraction_line(line, kv):
         return
     ma = re.match(r"\s*(\d+\.*\d+)\s+TS\s+(\S+)", line, re.I)
     if ma:
+        # full paths for conversion
+        fname = pathlib.Path(PureWindowsPath(ma.group(2)))
+        infile = bdir / fname
+        outfile = infile.with_suffix(".csv")
+        convert_timeseries(infile, outfile)
         kv.append(
             {
                 "ordinate": float(ma.group(1)),
                 "type": "ts",
-                "fname": str(pathlib.Path(ma.group(2))),
+                "value": str(fname.with_suffix(".csv")),
             }
         )
 
 
-def parse_sediment_ripping_line(line, kv):
+def parse_sediment_ripping_line(line, kv, bdir):
     ma = re.match(r"\s*(\d+\.*\d+)\s+(\S+)", line, re.I)
     if ma:
+        # full paths for conversion
+        fname = pathlib.Path(PureWindowsPath(ma.group(2)))
+        infile = bdir / fname
+        outfile = infile.with_suffix(".csv")
+        convert_timeseries(infile, outfile)
         kv.append(
-            {"ordinate": float(ma.group(1)), "fname": str(pathlib.Path(ma.group(2)))}
+            {"ordinate": float(ma.group(1)), "value": str(fname.with_suffix(".csv"))}
         )
 
 
@@ -388,7 +408,7 @@ def parse_allmodels_xsectfile(bdir, ifile: pathlib.Path, kv):
             "qsfact",
         ):
             if xs.get(k, None):
-                p[k] = xs[k]
+                p[k] = xs[k] if xs[k] != -1 else "Interp"
 
         p["profile"] = f"{ifile.with_suffix('')}_{xs['chainage']}.csv"
         kv["cross_sections"]["profiles"].append(p)

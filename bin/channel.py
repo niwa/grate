@@ -37,14 +37,15 @@ class Channel:
     def _chainpts(self):
         """Return chain points"""
         d = self._cfg.discretisation
-        return np.arange(d.chainage_min, d.chainage_max + self.dc / 2, self.dc)
+        c = np.arange(d.chainage_min, d.chainage_max + self.dc / 2, self.dc)
+        c[-1] = d.chainage_max
+        return c
 
     def _get_cross_sections(self) -> dict:
         """Return chainage point to CrossSection at that point"""
         xss = {}
 
         formrf = self._cfg.cross_sections.formrf
-        # wallrf = self._cfg.cross_sections.wallrf
 
         for xs in self._cfg.cross_sections.profiles:
             c = xs.chainage
@@ -57,6 +58,11 @@ class Channel:
         assert self.cs[-1] <= max(xss.keys()), (
             f"Maximum chainage ({self.cs[-1]}) is more than the maximum cross section chainage"
         )
+
+        # the CrossSections are potentially irregularly spaced and some will
+        # need interplation
+        CrossSection.resolve_interpolated_properties(xss)
+
         return xss
 
     def _get_interpolated_cross_sections(self):
