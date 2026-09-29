@@ -135,7 +135,11 @@ class HydroDynamicModel:
             # d, info = scipy.optimize.newton(f, self.d[lastchain], full_output=True)
             # if not info.converged:
             #     raise ValueError(f"Can't solve downstream normal depth. {info=}")
-            d = utils.newton(f, self.d[lastchain])
+            try:
+                d = utils.newton(f, self.d[lastchain])
+            except Exception as exp:
+                raise RuntimeError("Newton failed doing downstream normal") from exp
+
             return d
 
         raise ValueError(f"Unknown downstream boundary type: {tv['type']}")
@@ -239,7 +243,11 @@ class QuasiSteadyModel(HydroDynamicModel):
             # )
             # if not info.converged:
             #     raise ValueError(f"Can't solve for new d at index {i}. {info=}")
-            d = utils.newton(f, self.d[i], fprime=fprime)
+            try:
+                d = utils.newton(f, self.d[i], fprime=fprime)
+            except Exception as exp:
+                raise RuntimeError(f"Newton failed at cross-section {i}") from exp
+
             self.d[i] = d
 
 

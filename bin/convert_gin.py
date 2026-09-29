@@ -170,7 +170,7 @@ def parse_inflow_boundary_line(line, kv, bdir):
         Base path that .dat files etc are relative to
     """
 
-    ma = re.match(r"\s*(\d+\.*\d+)\s+(C|TS)\s+(.*)", line, re.I)
+    ma = re.match(r"\s*(\d+\.*\d*)\s+(C|TS)\s+(.*)", line, re.I)
     if not ma:
         return
     if ma.group(2).lower() == "c":
@@ -223,7 +223,7 @@ def parse_downstream_boundary_line(line, kv, bdir):
 
 
 def parse_sediment_boundary_line(line, kv, bdir):
-    ma = re.match(r"\s*(\d+\.*\d+)\s+RC", line, re.I)
+    ma = re.match(r"\s*(\d+\.*\d*)\s+RC", line, re.I)
     if ma:
         kv.append({"ordinate": float(ma.group(1)), "type": "rc"})
         return
@@ -238,7 +238,7 @@ def parse_sediment_boundary_line(line, kv, bdir):
             }
         )
         return
-    ma = re.match(r"\s*(\d+\.*\d+)\s+TS\s+(\d+)\s+(\S+)\s+(\S+)", line, re.I)
+    ma = re.match(r"\s*(\d+\.*\d*)\s+TS\s+(\d+)\s+(\S+)\s+(\S+)", line, re.I)
     if ma:
         # full paths for conversion
         fname = pathlib.Path(PureWindowsPath(ma.group(4)))
@@ -257,7 +257,7 @@ def parse_sediment_boundary_line(line, kv, bdir):
 
 
 def parse_sediment_extraction_line(line, kv, bdir):
-    ma = re.match(r"\s*(\d+\.*\d+)\s+C\s+(\S+)\s+(\S+)", line, re.I)
+    ma = re.match(r"\s*(\d+\.*\d*)\s+C\s+(\S+)\s+(\S+)", line, re.I)
     if ma:
         kv.append(
             {
@@ -268,7 +268,7 @@ def parse_sediment_extraction_line(line, kv, bdir):
             }
         )
         return
-    ma = re.match(r"\s*(\d+\.*\d+)\s+TS\s+(\S+)", line, re.I)
+    ma = re.match(r"\s*(\d+\.*\d*)\s+TS\s+(\S+)", line, re.I)
     if ma:
         # full paths for conversion
         fname = pathlib.Path(PureWindowsPath(ma.group(2)))
@@ -285,7 +285,7 @@ def parse_sediment_extraction_line(line, kv, bdir):
 
 
 def parse_sediment_ripping_line(line, kv, bdir):
-    ma = re.match(r"\s*(\d+\.*\d+)\s+(\S+)", line, re.I)
+    ma = re.match(r"\s*(\d+\.*\d*)\s+(\S+)", line, re.I)
     if ma:
         # full paths for conversion
         fname = pathlib.Path(PureWindowsPath(ma.group(2)))

@@ -1,3 +1,4 @@
+import sys
 import yaml
 import argparse
 import pathlib
@@ -49,8 +50,14 @@ def run_model(infile: pathlib.Path):
     run_start = time.perf_counter()
 
     while t <= end:
-        hmodel.update_depth(t)
-        chan.propogate_sediment(t, hmodel)
+        try:
+            hmodel.update_depth(t)
+            chan.propogate_sediment(t, hmodel)
+        except Exception:
+            out.write_step(t)
+            sys.stderr.write("Error occured, final state written to output file")
+            raise
+
         steps_to_go = int((end - t) / dt)
 
         if step > 1 and step % 10 == 0:

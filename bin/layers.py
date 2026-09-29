@@ -122,7 +122,10 @@ class LayerStack:
         # if not info.converged:
         #     raise ValueError(f"Can't solve grain_shear_velocity. {info=}")
 
-        ustar = utils.newton(f, init)
+        try:
+            ustar = utils.newton(f, init)
+        except Exception as exp:
+            raise RuntimeError(f"ustar newton fail t={t} cidx={self.chainidx}") from exp
 
         return ustar
 
