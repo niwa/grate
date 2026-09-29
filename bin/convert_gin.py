@@ -21,7 +21,7 @@ SECTION_MAPPINGS = {
     "Discretisation Parameters": "discretisation",
     "Bed Layer Setup": "bed_layer",
     "Active Layer Setup": "active_layer",
-    "Active Width Option": "morphological",
+    "Active Width Option": "active_width_option",
     "CROSS - SECTIONS": "cross_sections",
     "Inflow Boundary Conditions": "inflow_boundary",
     "Sediment Inflow Boundary Conditions": "sediment_boundary",
@@ -46,8 +46,14 @@ GIN_VALUE_MAPPINGS = {
         "4": "braided_channel",
     },
 }
-SECTIONS_TO_IGNORE = ["display", "hydraulic_calibration", "bed_layer", "active_layer"]
+SECTIONS_TO_IGNORE = ["display", "hydraulic_calibration"]
 KEYS_TO_IGNORE = ["VERSID", "OUTXSPARMS", "WALLRF", "REFGSZ", "REFNODE"]
+
+UNSUPPORTED_FUNCTIONALITY = [
+    ("active_layer", "alopt", 1),
+    ("active_width_option", "awopt", 2),
+    ("bed_layer", "blopt", 2),
+]
 
 
 def ykey(key: str) -> str:
@@ -563,8 +569,19 @@ def replace_section_headers(lines: list[str], mappings: dict, sep: str) -> list[
     return result
 
 
-def convert_legacy_wrong_section(kv) -> dict:
+def convert_legacy_wrong_section(kv):
     kv["discretisation"]["max_dc"] = kv["simulation_time"].pop("max_dx")
+
+
+def check_unsupported_functionality(kv):
+    """Error if user asked for functionality we don't support"""
+
+    for s, k, v in UNSUPPORTED_FUNCTIONALITY:
+        if s in kv:
+            if k in kv[s] and kv[s][k] != v:
+                raise ValueError(f"Cannot support {k.upper()} != {v}, remove it")
+            # we support this, but don't need it in the yaml
+            del kv[s]
 
 
 def parse_gin(fname: pathlib.Path) -> dict:
@@ -633,6 +650,7 @@ def parse_gin(fname: pathlib.Path) -> dict:
                 parse_section_line(section, line, kv, fname.parent)
 
     convert_legacy_wrong_section(kv)
+    check_unsupported_functionality(kv)
 
     # parse grain sizes
     assert len(kv.setdefault("grain_size_profiles", "")) > 0, (

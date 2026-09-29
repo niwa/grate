@@ -49,7 +49,6 @@ class Morphological(GrateBase):
     dk: p.StrictFloat = 2.0
     chi: p.StrictFloat = 0.7
     qthres: p.StrictFloat = 0.0
-    awopt: p.StrictInt | None = None
 
 
 class Discretisation(GrateBase):
