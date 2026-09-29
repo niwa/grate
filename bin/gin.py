@@ -441,14 +441,32 @@ class GrateConfig(GrateBase):
                 f"grain_size_profiles: {len(self.grain_size_profiles.sediment_densities)=} != {nlith=}"
             )
 
+    def _chk_csv_covers_timeperiod(self, msg: str, seri):
+        """check covers simulation period"""
+
+        start = self.simulation_time.start
+        end = self.simulation_time.end
+        if start < seri.index[0] or seri.index[-1] < end:
+            raise ValueError(
+                f"{msg} does not cover the simulation period "
+                f"{start} to {end}; "
+                f"timeseries covers {seri.index[0]} to {seri.index[-1]}"
+            )
+
     def _load_inflow_timeseries(self):
         self._processed_inflow.clear()
         for boundary in self.inflow_boundary:
             val = boundary.value
             if boundary.type == "ts":
-                val = pd.read_csv(val, index_col=0, parse_dates=True)[
-                    "flow"
-                ].sort_index()
+                try:
+                    val = pd.read_csv(val, index_col=0, parse_dates=True)[
+                        "flow"
+                    ].sort_index()
+                    self._chk_csv_covers_timeperiod(
+                        f"Inflow ts {boundary.value} at {boundary.ordinate}", val
+                    )
+                except Exception as exp:
+                    raise ValueError(f"Could not parse {boundary.value}: {exp}")
             self._processed_inflow.append(
                 RuntimeInflowBoundary(
                     ordinate=boundary.ordinate,
@@ -466,9 +484,13 @@ class GrateConfig(GrateBase):
         else:
             val = b.value
             if b.type == "ts":
-                val = pd.read_csv(val, index_col=0, parse_dates=True)[
-                    "flow"
-                ].sort_index()
+                try:
+                    val = pd.read_csv(val, index_col=0, parse_dates=True)[
+                        "flow"
+                    ].sort_index()
+                    self._chk_csv_covers_timeperiod(f"Downstream ts {b.value}", val)
+                except Exception as exp:
+                    raise ValueError(f"Could not parse {b.value}: {exp}")
             self._processed_downstream_boundary = RuntimeDownstreamBoundary(
                 type=b.type,
                 value=val,
@@ -493,9 +515,15 @@ class GrateConfig(GrateBase):
             # val is kg/s
             val = boundary.value
             if boundary.type == "ts":
-                val = pd.read_csv(val, index_col=0, parse_dates=True)[
-                    "flow"
-                ].sort_index()
+                try:
+                    val = pd.read_csv(val, index_col=0, parse_dates=True)[
+                        "flow"
+                    ].sort_index()
+                    self._chk_csv_covers_timeperiod(
+                        f"Sediment ts {boundary.value} at {boundary.ordinate}", val
+                    )
+                except Exception as exp:
+                    raise ValueError(f"Could not parse {boundary.value}: {exp}")
                 val *= boundary.scale
                 # make each row be val * jliprops unravelled
                 values = val.to_numpy()[:, None] * jliprops.ravel()[None, :]
