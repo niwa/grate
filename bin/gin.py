@@ -29,7 +29,7 @@ class SimulationTime(GrateBase):
     max_dt_qs: p.StrictFloat
     max_dt_fd: p.StrictFloat
     cdt: p.StrictFloat
-    max_dq_over_dt: p.StrictFloat
+    max_dq_over_dt: p.StrictFloat | None = None
 
 
 class HDParams(GrateBase):
@@ -44,11 +44,11 @@ class Morphological(GrateBase):
     la: p.StrictFloat
     nbs: p.StrictInt
     poro: p.StrictFloat
-    alpha_s: p.StrictFloat
-    neqal: p.StrictInt
-    dk: p.StrictFloat
+    alpha_s: p.StrictFloat | None = None
+    neqal: p.StrictInt = 0.0
+    dk: p.StrictFloat = 2.0
     chi: p.StrictFloat = 0.7
-    qthres: p.StrictFloat
+    qthres: p.StrictFloat = 0.0
     refgsz: p.StrictFloat
     refnode: p.StrictInt | None = None
     awopt: p.StrictInt | None = None
