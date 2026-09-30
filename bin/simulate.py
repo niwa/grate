@@ -50,8 +50,10 @@ def run_model(infile: pathlib.Path):
     print("done", flush=True)
     out = Output(cfg, hmodel, chan)
 
+    do_sediment_transport = True
     start = cfg.simulation_time.start
     end = cfg.simulation_time.end
+    sim_total_seconds = (end - start).total_seconds()
     step = 0
     t = start
     dt = pd.Timedelta(seconds=chan.get_dt())
@@ -60,22 +62,23 @@ def run_model(infile: pathlib.Path):
     while t <= end:
         try:
             hmodel.update_depth(t)
-            chan.propogate_sediment(t, hmodel)
+            if do_sediment_transport:
+                chan.propogate_sediment(t, hmodel)
         except Exception:
             out.write_step(t)
             sys.stderr.write("Error occured, final state written to output file")
             raise
 
-        steps_to_go = int((end - t) / dt)
-
         if step > 1 and step % 10 == 0:
             elapsed = time.perf_counter() - run_start
-            seconds_per_step = elapsed / step
-            seconds_left = steps_to_go * seconds_per_step
+
+            sim_elapsed = (t - start).total_seconds()
+            seconds_left = elapsed * (sim_total_seconds / sim_elapsed - 1)
+
             finish = pd.Timestamp.now() + pd.Timedelta(seconds=seconds_left)
 
             print(
-                f"\rApproximate steps left... {steps_to_go:,} (at {finish.isoformat(timespec='seconds')})    ",
+                f"\rProgress={int(100 * sim_elapsed / sim_total_seconds)}% dt={dt.total_seconds()}s (est. finish at {finish.isoformat(timespec='seconds')})    ",
                 end="",
                 flush=True,
             )
@@ -93,6 +96,14 @@ def run_model(infile: pathlib.Path):
 
         step += 1
         dt = pd.Timedelta(seconds=chan.get_dt())
+
+        # if above qthres increase dt and don't do sediment transport
+        if hmodel.Q(t, len(hmodel.cs) - 1) < cfg.morphological.qthres:
+            dt *= cfg.morphological.qthres_dtmultiplier
+            do_sediment_transport = False
+        else:
+            do_sediment_transport = True
+
         t += dt
 
     print()
