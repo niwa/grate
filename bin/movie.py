@@ -1,9 +1,9 @@
 import argparse
 import pathlib
-import subprocess
-import tempfile
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
 import xarray as xr
+from utils import positive_float
 
 
 def _prepare_movie_data(ds: xr.Dataset, var: str, xdim: str, sels: dict[str, int]):
@@ -84,113 +84,71 @@ def make_movie(
 
     plot_data, x = _prepare_movie_data(ds, var, xdim, sels)
 
-    ntime = plot_data[0][1].sizes["time"]
-
     ymin = min(float(da.min()) for _, da in plot_data)
     ymax = max(float(da.max()) for _, da in plot_data)
-
-    if ymin == ymax:
-        padding = 1.0
-    else:
-        padding = (ymax - ymin) * 0.05
+    padding = (ymax - ymin) * 0.05 if ymin != ymax else 1
     ymin -= padding
     ymax += padding
 
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # make the empty lines, one per var in plot_data
+    lines = [ax.plot([], [], label=label)[0] for label, _ in plot_data]
+
+    ax.set_xlabel(xdim)
+    ax.set_ylabel(var)
+    ax.set_xlim(float(x.min()), float(x.max()))
+    ax.set_ylim(ymin, ymax)
+    ax.grid(True)
+
+    if len(plot_data) > 1:
+        ax.legend()
+
+    def update(i):
+        t = plot_data[0][1]["time"].isel(time=i).values
+
+        # put each var in for ith frame
+        for line, (_, da) in zip(lines, plot_data):
+            line.set_data(x, da.isel(time=i).values)
+
+        ax.set_title(f"{var}   {t}")
+        print(f"\rFrame {i + 1}/{steps}", end="", flush=True)
+        return lines
+
+    steps = plot_data[0][1].sizes["time"]
+    ani = FuncAnimation(fig, update, frames=steps, interval=dur * 1000, blit=True)
+
     outfile.parent.mkdir(parents=True, exist_ok=True)
+    ani.save(outfile, writer=PillowWriter(fps=1 / dur))
 
-    with tempfile.TemporaryDirectory(prefix="grate_movie_") as tmpdir:
-        tmpdir = pathlib.Path(tmpdir)
-
-        for i in range(ntime):
-            t = plot_data[0][1]["time"].isel(time=i).values
-
-            fig, ax = plt.subplots(figsize=(10, 6))
-
-            for label, da in plot_data:
-                ax.plot(x, da.isel(time=i).values, label=label)
-
-            ax.set_xlabel(xdim)
-            ax.set_ylabel(var)
-            ax.set_ylim(ymin, ymax)
-            ax.set_title(f"{var}   {t}")
-            ax.grid(True)
-
-            if len(plot_data) > 1:
-                ax.legend()
-
-            frame = tmpdir / f"frame_{i:06d}.png"
-
-            fig.tight_layout()
-            fig.savefig(frame, dpi=120)
-            plt.close(fig)
-
-            print(f"\rFrame {i + 1}/{ntime}", end="", flush=True)
-
-        print()
-
-        cmd = [
-            "ffmpeg",
-            "-loglevel",
-            "error",
-            "-y",
-            "-framerate",
-            str(1 / dur),
-            "-i",
-            str(tmpdir / "frame_%06d.png"),
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            str(outfile),
-        ]
-
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+    print()
+    plt.close(fig)
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Make movie for xarray NetCDF variable"
-    )
-    parser.add_argument("netcdf", type=pathlib.Path, help="Input NetCDF")
-    parser.add_argument("var", help="Variable to plot, eg depth ")
-    parser.add_argument("--xdim", default="chainage", help="x-axis dim, eg chainage")
-    parser.add_argument(
+    p = argparse.ArgumentParser(description="Make movie for xarray NetCDF variable")
+    p.add_argument("inf", type=pathlib.Path, help="Input NetCDF")
+    p.add_argument("var", help="Variable to plot, eg depth ")
+    p.add_argument("--xdim", default="chainage", help="x-axis dim, eg chainage")
+    p.add_argument(
         "--sel",
         action="append",
         default=[],
-        metavar="DIM=INDEX",
+        metavar="<dim>=<idx>",
         help="Select an index for a dimension, eg --sel rgsize=10",
     )
-    parser.add_argument("movie", type=pathlib.Path, help="Output filename, eg out.mp4")
-    parser.add_argument(
-        "--dur",
-        type=float,
-        default=0.5,
-        help="Seconds to display each frame (default: 0.5)",
-    )
+    p.add_argument("outf", type=pathlib.Path, help="Output filename, eg out.mp4")
+    p.add_argument("-p", type=positive_float, default=0.1, help="Period (def: 0.1)")
 
-    args = parser.parse_args()
+    args = p.parse_args()
 
-    sels = {}
-    for kv in args.sel:
-        try:
-            dim, index = kv.split("=", 1)
-            sels[dim] = int(index)
-        except ValueError:
-            parser.error(f"Invalid selection {kv}; expected DIM=INT")
+    try:
+        sels = {dim: int(idx) for kv in args.sel for dim, idx in [kv.split("=", 1)]}
+    except ValueError:
+        p.error("Invalid selection; expected DIM=INT")
 
-    if args.dur <= 0:
-        parser.error("--dur must be greater than zero")
-
-    make_movie(
-        args.netcdf,
-        args.var,
-        args.xdim,
-        sels,
-        args.dur,
-        args.movie,
-    )
-    print(f"Movie written to {args.movie}")
+    make_movie(args.inf, args.var, args.xdim, sels, args.p, args.outf)
+    print(f"Movie written to {args.outf}")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 import sys
 import pathlib
+import argparse
 
 
 def resolved_path(rpath):
@@ -22,6 +23,13 @@ def resolved_path(rpath):
         base = pathlib.Path(__file__).parent.parent
 
     return base / rpath
+
+
+def positive_float(value):
+    value = float(value)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return value
 
 
 def try_to_num(val: str):

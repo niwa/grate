@@ -18,6 +18,8 @@ import updates
 from convert_gin import parse_gin
 from gin import GrateConfig
 from simulate import run_model
+from utils import positive_float
+from movie import make_movie
 
 # parse command line
 p = argparse.ArgumentParser(
@@ -58,6 +60,19 @@ validate.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
 runmode = sub.add_parser("run", help="Run yaml model")
 runmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
 
+moviemode = sub.add_parser("movie", help="Make movie for xarray NetCDF variable")
+moviemode.add_argument("inf", type=pathlib.Path, help="Input NetCDF")
+moviemode.add_argument("var", help="Variable to plot, eg depth")
+moviemode.add_argument("--xdim", default="chainage", help="x-axis dim, eg chainage")
+moviemode.add_argument(
+    "--sel",
+    action="append",
+    default=[],
+    metavar="<dim=<idx>",
+    help="Select index for a dim, eg --sel rgsize=10",
+)
+moviemode.add_argument("outf", type=pathlib.Path, help="Output filename, eg out.gif")
+moviemode.add_argument("-p", type=positive_float, default=0.1, help="Period (def: 0.1)")
 args = p.parse_args()
 
 match args.command:
@@ -86,6 +101,14 @@ match args.command:
         updates.version_check()
         print(f"Running {args.yaml}")
         run_model(args.yaml)
+
+    case "movie":
+        try:
+            sels = {dim: int(idx) for kv in args.sel for dim, idx in [kv.split("=", 1)]}
+        except ValueError:
+            p.error("Invalid selection; expected DIM=INT")
+        make_movie(args.inf, args.var, args.xdim, sels, args.p, args.outf)
+        print(f"Movie written to {args.outf}")
 
     case _:
         p.print_help()
