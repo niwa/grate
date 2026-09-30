@@ -269,9 +269,9 @@ class CrossSection:
         return self.layers.grain_stress(t, hydro)
 
     @lru_cache(maxsize=1000)
-    def _wetted_segments(self, h: float, loc: Loc | None, min_bed_level: float):
+    def _wetted_segments(self, d: float, loc: Loc | None, min_bed_level: float):
         """Yield roughness, perimeter, width and area for each wetted segment."""
-        water_level = min_bed_level + h
+        water_level = min_bed_level + d
 
         profile = {
             Loc.LEFT: self.left,

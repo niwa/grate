@@ -5,8 +5,8 @@ import pathlib
 import pandas as pd
 import time
 from gin import GrateConfig
-from channel import Channel
-from hydrodynamics_models import QuasiSteadyModel
+from channel import River, BraidedChannel
+from hydrodynamics_models import QuasiSteadyModel, DynamicWaveModel
 from output import Output
 
 
@@ -35,10 +35,18 @@ def run_model(infile: pathlib.Path):
 
     with open(infile) as f:
         cfg = GrateConfig.model_validate(yaml.safe_load(f))
+
     print("Creating channel...", end="", flush=True)
-    chan = Channel(cfg)
+    chan = {"flume": River, "river": River, "braided_channel": BraidedChannel}[
+        cfg.model.channel_type
+    ](cfg)
+
     print("done\nCreating hydromodel...", end="", flush=True)
-    hmodel = QuasiSteadyModel(cfg, chan)
+    hmodel = {
+        "quasi_ss": QuasiSteadyModel,
+        "dynamic": DynamicWaveModel,
+    }[cfg.model.hydro_model_type](cfg, chan)
+
     print("done", flush=True)
     out = Output(cfg, hmodel, chan)
 

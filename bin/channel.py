@@ -106,9 +106,9 @@ class Channel:
         """Momentum correction factor"""
         return 1
 
-    def area(self, c: int, h: float, loc: Loc | None = None):
-        """Return area of water between bed and h"""
-        return self.xss[c].area(h, loc)
+    def area(self, c: int, d: float, loc: Loc | None = None):
+        """Return area of water between bed and bed+d"""
+        return self.xss[c].area(d, loc)
 
     def get_mean_bed_level(self, c: int):
         """Return mean bed level of profile at chainage c
@@ -133,9 +133,9 @@ class Channel:
         dc = self.cs[c + 1] - self.cs[c]
         return (self.get_mean_bed_level(c + 1) - self.get_mean_bed_level(c)) / dc
 
-    def Bwet(self, c: int, h: float):
+    def Bwet(self, c: int, d: float):
         """Water surface width"""
-        return self.xss[c].Bwet(h)
+        return self.xss[c].Bwet(d)
 
     def grain_stress(self, c: int, t: pd.Timestamp, hydro):
         return self.xss[c].grain_stress(t, hydro)
@@ -187,3 +187,12 @@ class Channel:
     def R(self, c: int, d: float):
         """Hydraulic radius A/P over entire xsection"""
         return self.xss[c].R(d)
+
+
+class River(Channel):
+    pass
+
+
+class BraidedChannel(Channel):
+    def _init_dt(self):
+        raise NotImplementedError("BraidedChannel is unusable")

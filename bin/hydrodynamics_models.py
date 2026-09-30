@@ -252,4 +252,6 @@ class QuasiSteadyModel(HydroDynamicModel):
 
 
 class DynamicWaveModel(HydroDynamicModel):
-    pass
+    def initialize(self, t: pd.Timestamp):
+        """Set depth to initial values."""
+        raise NotImplementedError(f"DynamicWaveModel is unusable at time {t}")
