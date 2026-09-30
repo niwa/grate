@@ -1,7 +1,12 @@
 import argparse
 import pathlib
+
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
+
 import xarray as xr
 from utils import positive_float
 
