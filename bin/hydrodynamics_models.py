@@ -2,6 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 from functools import lru_cache
+import scipy
 
 import utils
 from gin import GrateConfig
@@ -202,12 +203,15 @@ class QuasiSteadyModel(HydroDynamicModel):
             + (self.beta() * self.u(t, c, d) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
             / (2 * g)
             - self.d[c + 1]
-            + (self.S0(c) - sf) * dc
+            + (-self.S0(c) - sf) * dc
         )
         return f
 
     def dEdd(self, t: pd.Timestamp, c: int, d: float):
-        """Calculate f prime equation 5.9"""
+        """Calculate f prime equation 5.9
+
+        FIXME, this is probably wrong
+        """
 
         dc = self.cs[c + 1] - self.cs[c]
         sf = (self.Sf(t, c, d) + self.Sf(t, c + 1)) / 2
@@ -228,25 +232,46 @@ class QuasiSteadyModel(HydroDynamicModel):
 
         # use d[i+1] to calculate d[i]
         for i in range(len(self.cs) - 2, -1, -1):
+            # print(f"At chainidx {i}")
 
             def f(d):
+                # print(d, coe)
                 return self.conservation_of_energy(t, i, d)
 
-            def fprime(d):
-                return self.dEdd(t, i, d)
+            # def fprime(d):
+            #     return self.dEdd(t, i, d)
 
-            # d, info = scipy.optimize.newton(
-            #     f,
-            #     self.d[i],
-            #     fprime=fprime,
-            #     full_output=True,
-            # )
-            # if not info.converged:
-            #     raise ValueError(f"Can't solve for new d at index {i}. {info=}")
+            # try:
+            #     d, info = scipy.optimize.newton(
+            #         f,
+            #         self.d[i],
+            #         fprime=fprime,
+            #         full_output=True,
+            #     )
+            #     if not info.converged:
+            #         raise ValueError(f"Can't solve for new d at index {i}. {info=}")
+            # except Exception as exp:
+            #     for d in np.arange(0.96, 1.01, 0.0001):
+            #         print(d, f(d))
+            #     raise ValueError(f"Died")
             try:
-                d = utils.newton(f, self.d[i], fprime=fprime)
+                # d = utils.newton(f, self.d[i], fprime=fprime)
+                d = utils.newton(f, self.d[i])
             except Exception as exp:
-                raise RuntimeError(f"Newton failed at cross-section {i}") from exp
+                # d = np.arange(0.9, 1.1, 0.0001)
+                # fd = np.array([f(i) for i in d])
+                # fp = np.array([fprime(i) for i in d])
+                # df = pd.DataFrame(
+                #     {
+                #         "d": d,
+                #         "f": fd,
+                #         "fprime": fp,
+                #     }
+                # )
+                # df.to_csv("/tmp/f_values.csv", index=False)
+                raise RuntimeError(
+                    f"Newton failed at cross-section {i} chainage={self.cs[i]}"
+                ) from exp
 
             self.d[i] = d
 

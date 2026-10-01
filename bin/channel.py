@@ -125,13 +125,16 @@ class Channel:
     def S0(self, c: int):
         """Bed slope at c
 
-        Bed slope is the slope between chainages of mean_bed_level
+        Bed slope is the slope between chainages of min_bed_level
+
+        Negative slope is downhill as we go downstream
+
         """
         assert c < self.nc - 1, (
             f"Cannot calculate S0({c}), likely because this is the most downstream point"
         )
         dc = self.cs[c + 1] - self.cs[c]
-        return (self.get_mean_bed_level(c + 1) - self.get_mean_bed_level(c)) / dc
+        return (self.get_min_bed_level(c + 1) - self.get_min_bed_level(c)) / dc
 
     def Bwet(self, c: int, d: float):
         """Water surface width"""

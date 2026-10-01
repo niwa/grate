@@ -99,7 +99,7 @@ def run_model(infile: pathlib.Path):
 
         # if above qthres increase dt and don't do sediment transport
         if hmodel.Q(t, len(hmodel.cs) - 1) < cfg.morphological.qthres:
-            dt *= cfg.morphological.qthres_dtmultiplier
+            dt = cfg.simulation_time.max_dt_qs * cfg.morphological.qthres_dtmultiplier
             do_sediment_transport = False
         else:
             do_sediment_transport = True
