@@ -102,10 +102,6 @@ class Channel:
     def _get_sediment_bc(self):
         """Return"""
 
-    def beta(self):
-        """Momentum correction factor"""
-        return 1
-
     def area(self, c: int, d: float, loc: Loc | None = None):
         """Return area of water between bed and bed+d"""
         return self.xss[c].area(d, loc)

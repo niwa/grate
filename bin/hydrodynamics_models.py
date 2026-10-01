@@ -22,7 +22,7 @@ class HydroDynamicModel:
 
     def beta(self):
         """Momentum correction factor"""
-        return self._channel.beta()
+        return self._cfg.morphological.beta
 
     def Q(self, t: pd.Timestamp, c: int):
         """Return flow at point along river

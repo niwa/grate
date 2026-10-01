@@ -50,6 +50,7 @@ class Morphological(GrateBase):
     chi: p.StrictFloat = 0.7
     qthres: p.StrictFloat = 0.0
     qthres_dtmultiplier: p.StrictFloat = 20.0
+    beta: p.StrictFloat = 1.0
 
 
 class Discretisation(GrateBase):
