@@ -142,14 +142,14 @@ class RuntimeDownstreamBoundary:
     type: str
     value: float | pd.Series | None = None
     slope: float | None = None
-    hinit: float | None = None
+    wl_init: float | None = None
 
     def value_at(self, t: pd.Timestamp) -> dict:
         if self.type in ("elevation", "depth"):
             return {self.type: self.value}
 
         if self.type == "normal":
-            return {self.type: {"slope": self.slope, "hinit": self.hinit}}
+            return {self.type: {"slope": self.slope, "wl_init": self.wl_init}}
 
         s = self.value
         if t in s.index:
@@ -190,7 +190,7 @@ class DownstreamBoundaryDepth(GrateBase):
 class DownstreamBoundaryNorm(GrateBase):
     type: typing.Literal["normal"]
     slope: p.StrictFloat
-    hinit: p.StrictFloat
+    wl_init: p.StrictFloat
 
 
 DownstreamBoundary = typing.Annotated[
@@ -481,7 +481,7 @@ class GrateConfig(GrateBase):
         b = self.downstream_boundary
         if b.type == "normal":
             self._processed_downstream_boundary = RuntimeDownstreamBoundary(
-                type=b.type, slope=b.slope, hinit=b.hinit
+                type=b.type, slope=b.slope, wl_init=b.wl_init
             )
         else:
             val = b.value

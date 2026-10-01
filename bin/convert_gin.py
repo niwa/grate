@@ -218,7 +218,7 @@ def parse_downstream_boundary_line(line, kv, bdir):
         kv["downstream_boundary"] = {
             "type": "normal",
             "slope": float(ma.group(4)),
-            "hinit": float(ma.group(5)),
+            "wl_init": float(ma.group(5)),
         }
 
 

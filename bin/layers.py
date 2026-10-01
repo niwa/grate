@@ -103,6 +103,7 @@ class LayerStack:
         ks = self._d90
 
         def f(ustar):
+            assert ustar > 0, f"Invalid {ustar=}"
             hs = ustar**2 / GRAVITY / Sf
             return ustar - u * KAPPA / math.log(11 * hs / ks)
 

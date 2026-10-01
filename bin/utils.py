@@ -45,8 +45,11 @@ def try_to_num(val: str):
     return val
 
 
-def newton(func, x0, fprime=None, tol=1.48e-8, maxiter=50):
-    """Save pulling in scipy just to get newton."""
+def newton(func, x0, fprime=None, lower=0.0, tol=1.48e-8, maxiter=50):
+    """Save pulling in scipy just to get newton.
+
+    x cannot go below lower
+    """
 
     x = float(x0)
 
@@ -60,7 +63,11 @@ def newton(func, x0, fprime=None, tol=1.48e-8, maxiter=50):
                 raise RuntimeError("Derivative was zero")
 
             dx = fx / dfx
-            x -= dx
+
+            if x - dx <= lower:
+                x /= 2.0
+            else:
+                x -= dx
 
             if abs(dx) <= tol:
                 return x
@@ -80,6 +87,9 @@ def newton(func, x0, fprime=None, tol=1.48e-8, maxiter=50):
                 raise RuntimeError("Zero denominator in secant iteration")
 
             x_new = x - f * (x - x_prev) / denominator
+
+            if x_new <= lower:
+                x_new = x / 2
 
             if abs(x_new - x) <= tol:
                 return x_new

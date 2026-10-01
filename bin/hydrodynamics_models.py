@@ -2,7 +2,6 @@ import math
 import numpy as np
 import pandas as pd
 from functools import lru_cache
-import scipy
 
 import utils
 from gin import GrateConfig
@@ -17,8 +16,18 @@ class HydroDynamicModel:
         self.initialize(self._cfg.simulation_time.start)
 
     def initialize(self, t: pd.Timestamp):
-        """Set depth to initial values."""
-        raise NotImplementedError(f"initialize({t})")
+        """Set d to initial value."""
+        # use the downstream for water level. 'normal' is a special case,
+        # use wl_init
+        tv = self._cfg._processed_downstream_boundary.value_at(t)
+        # FIXME, elevation
+        if "normal" in tv:
+            v = tv["normal"]["wl_init"]
+            v -= self._channel.get_min_bed_level(len(self.cs) - 1)
+        else:
+            v = self.get_ds_d(t)
+
+        self.d = np.full(len(self.cs), v, dtype=float)
 
     def beta(self):
         """Momentum correction factor"""
@@ -117,12 +126,15 @@ class HydroDynamicModel:
     def update_depth(self):
         raise NotImplementedError()
 
+    # FIXME, rename
     def get_ds_d(self, t: pd.Timestamp):
         """Return downstream depth of water."""
         lastchain = len(self.cs) - 1
         tv = self._cfg._processed_downstream_boundary.value_at(t)
+        # FIXME, changing to elevation
         if "elevation" in tv:
             return tv["elevation"] - self._channel.get_min_bed_level(lastchain)
+        # FIXME, changing to elevation
         if "depth" in tv:
             return tv["depth"]
         if "normal" in tv:
@@ -147,21 +159,6 @@ class HydroDynamicModel:
 
 
 class QuasiSteadyModel(HydroDynamicModel):
-    def initialize(self, t: pd.Timestamp):
-        """Set d to initial value."""
-        # initialize depth by setting to 1m, then running an update, after
-        # doing downstream
-        self.d = np.ones(len(self.cs))
-
-        # if the downstream boundary condition is normal, grab the hinit which
-        # is an elevation (need to subtract off
-        tv = self._cfg._processed_downstream_boundary.value_at(t)
-        if "normal" in tv:
-            self.d[-1] = tv["normal"]["hinit"]
-            self.d[-1] -= self._channel.get_min_bed_level(len(self.cs) - 1)
-
-        self.update_depth(t)
-
     @lru_cache(maxsize=400)
     def Q(self, t: pd.Timestamp, c: int):
         """Return flow at point along river
@@ -225,7 +222,15 @@ class QuasiSteadyModel(HydroDynamicModel):
         )
         return fprime
 
+    # FIXME, should be update_water_level
     def update_depth(self, t: pd.Timestamp):
+        """FIXME
+
+        Parameters
+        ----------
+        t: pd.Timestamp
+            Timestep
+        """
 
         # get the most downstream depth
         self.d[-1] = self.get_ds_d(t)
@@ -256,18 +261,13 @@ class QuasiSteadyModel(HydroDynamicModel):
             #     raise ValueError(f"Died")
             try:
                 # d = utils.newton(f, self.d[i], fprime=fprime)
-                d = utils.newton(f, self.d[i])
+                # use the downstream depth as an initial guess.  FIXME: when
+                # switching to water level need to do some adjusting here
+                d = utils.newton(f, self.d[i + 1])
             except Exception as exp:
-                # d = np.arange(0.9, 1.1, 0.0001)
+                # d = np.arange(0.1, 1.1, 0.0001)
                 # fd = np.array([f(i) for i in d])
-                # fp = np.array([fprime(i) for i in d])
-                # df = pd.DataFrame(
-                #     {
-                #         "d": d,
-                #         "f": fd,
-                #         "fprime": fp,
-                #     }
-                # )
+                # df = pd.DataFrame({"d": d, "f": fd})
                 # df.to_csv("/tmp/f_values.csv", index=False)
                 raise RuntimeError(
                     f"Newton failed at cross-section {i} chainage={self.cs[i]}"
@@ -278,5 +278,4 @@ class QuasiSteadyModel(HydroDynamicModel):
 
 class DynamicWaveModel(HydroDynamicModel):
     def initialize(self, t: pd.Timestamp):
-        """Set depth to initial values."""
         raise NotImplementedError(f"DynamicWaveModel is unusable at time {t}")
