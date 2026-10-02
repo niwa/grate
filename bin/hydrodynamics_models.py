@@ -20,7 +20,7 @@ class HydroDynamicModel:
         # use the downstream for water level. 'normal' is a special case,
         # use wl_init
         tv = self._cfg._processed_downstream_boundary.value_at(t)
-        # FIXME, elevation
+        # this is elevation, we want depth
         if "normal" in tv:
             v = tv["normal"]["wl_init"]
             v -= self._channel.get_min_bed_level(len(self.cs) - 1)
@@ -126,15 +126,12 @@ class HydroDynamicModel:
     def update_depth(self):
         raise NotImplementedError()
 
-    # FIXME, rename
     def get_ds_d(self, t: pd.Timestamp):
         """Return downstream depth of water."""
         lastchain = len(self.cs) - 1
         tv = self._cfg._processed_downstream_boundary.value_at(t)
-        # FIXME, changing to elevation
         if "elevation" in tv:
             return tv["elevation"] - self._channel.get_min_bed_level(lastchain)
-        # FIXME, changing to elevation
         if "depth" in tv:
             return tv["depth"]
         if "normal" in tv:
@@ -145,9 +142,6 @@ class HydroDynamicModel:
                 K = self.conveyance(lastchain, d)
                 return Q - K * math.sqrt(slope)
 
-            # d, info = scipy.optimize.newton(f, self.d[lastchain], full_output=True)
-            # if not info.converged:
-            #     raise ValueError(f"Can't solve downstream normal depth. {info=}")
             try:
                 d = utils.newton(f, self.d[lastchain])
             except Exception as exp:
@@ -204,27 +198,8 @@ class QuasiSteadyModel(HydroDynamicModel):
         )
         return f
 
-    def dEdd(self, t: pd.Timestamp, c: int, d: float):
-        """Calculate f prime equation 5.9
-
-        FIXME, this is probably wrong
-        """
-
-        dc = self.cs[c + 1] - self.cs[c]
-        sf = (self.Sf(t, c, d) + self.Sf(t, c + 1)) / 2
-        g = 9.8
-        B = self.Bwet(c, d)
-        A = self.A(c, d)
-        fprime = (
-            1
-            - (self.beta() * B * self.u(t, c, d) ** 2) / (g * A)
-            + sf * (B + 0.667 / self.R(c, d)) * dc / A
-        )
-        return fprime
-
-    # FIXME, should be update_water_level
     def update_depth(self, t: pd.Timestamp):
-        """FIXME
+        """F
 
         Parameters
         ----------
@@ -240,29 +215,9 @@ class QuasiSteadyModel(HydroDynamicModel):
             # print(f"At chainidx {i}")
 
             def f(d):
-                # print(d, coe)
                 return self.conservation_of_energy(t, i, d)
 
-            # def fprime(d):
-            #     return self.dEdd(t, i, d)
-
-            # try:
-            #     d, info = scipy.optimize.newton(
-            #         f,
-            #         self.d[i],
-            #         fprime=fprime,
-            #         full_output=True,
-            #     )
-            #     if not info.converged:
-            #         raise ValueError(f"Can't solve for new d at index {i}. {info=}")
-            # except Exception as exp:
-            #     for d in np.arange(0.96, 1.01, 0.0001):
-            #         print(d, f(d))
-            #     raise ValueError(f"Died")
             try:
-                # d = utils.newton(f, self.d[i], fprime=fprime)
-                # use the downstream depth as an initial guess.  FIXME: when
-                # switching to water level need to do some adjusting here
                 d = utils.newton(f, self.d[i + 1])
             except Exception as exp:
                 # d = np.arange(0.1, 1.1, 0.0001)

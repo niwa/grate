@@ -17,7 +17,7 @@ def run_model(infile: pathlib.Path):
         hits = sum(x.hits for x in infos)
         misses = sum(x.misses for x in infos)
         return {
-            "hit": hits / (hits + misses),
+            "hit": hits / (hits + misses) if hits + misses > 0 else "NaN",
             "hits": hits,
             "misses": misses,
             "currsize": sum(x.currsize for x in infos),
@@ -85,7 +85,7 @@ def run_model(infile: pathlib.Path):
 
             # print(
             #     f"\033[7F"
-            #     f"Approximate steps left... {steps_to_go:,} (at {finish:%H:%M:%S})\n"
+            #     f"\rProgress={int(100 * sim_elapsed / sim_total_seconds)}% dt={dt.total_seconds():.2f}s (est. finish at {finish.isoformat(timespec='seconds')})\n",
             #     f"Cache:\n{cache_info()}",
             #     end="",
             #     flush=True,
