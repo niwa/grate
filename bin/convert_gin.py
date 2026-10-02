@@ -137,21 +137,20 @@ def parse_section_line(section, line, kv, bdir):
             kv.setdefault(section, {})[key] = yval(section, key, value)
 
 
-def convert_timeseries(infile, outfile):
+def convert_timeseries(infile, outfile, var: str):
     """Convert old timeseries format to csv"""
 
     with open(infile) as f:
         lines = [
             line for line in f if not line.startswith("!") and len(line.split()) == 3
         ]
-    df = pd.DataFrame(
-        [line.split() for line in lines], columns=["date", "time", "flow"]
-    )
+    df = pd.DataFrame([line.split() for line in lines], columns=["date", "time", "var"])
 
     df["time"] = pd.to_datetime(
         df["date"].astype(str) + df["time"].astype(str), format="%Y%m%d%H%M%S"
     )
-    df = df[["time", "flow"]].set_index("time")
+    df = df[["time", "var"]].set_index("time")
+    df = df.rename(columns={"var": var})
     df.to_csv(outfile, date_format="%Y-%m-%dT%H:%M:%S")
 
 
@@ -186,7 +185,7 @@ def parse_inflow_boundary_line(line, kv, bdir):
         fname = pathlib.Path(PureWindowsPath(ma.group(3)))
         infile = bdir / fname
         outfile = infile.with_suffix(".csv")
-        convert_timeseries(infile, outfile)
+        convert_timeseries(infile, outfile, "flow")
         kv.append(
             {
                 "ordinate": float(ma.group(1)),
@@ -209,7 +208,7 @@ def parse_downstream_boundary_line(line, kv, bdir):
         fname = pathlib.Path(PureWindowsPath(ma.group(2)))
         infile = bdir / fname
         outfile = infile.with_suffix(".csv")
-        convert_timeseries(infile, outfile)
+        convert_timeseries(infile, outfile, "water_level")
         kv["downstream_boundary"] = {
             "type": "ts",
             "value": str(fname.with_suffix(".csv")),
@@ -244,7 +243,7 @@ def parse_sediment_boundary_line(line, kv, bdir):
         fname = pathlib.Path(PureWindowsPath(ma.group(4)))
         infile = bdir / fname
         outfile = infile.with_suffix(".csv")
-        convert_timeseries(infile, outfile)
+        convert_timeseries(infile, outfile, "unknown_0_FIXME")
         kv.append(
             {
                 "ordinate": float(ma.group(1)),
@@ -274,7 +273,7 @@ def parse_sediment_extraction_line(line, kv, bdir):
         fname = pathlib.Path(PureWindowsPath(ma.group(2)))
         infile = bdir / fname
         outfile = infile.with_suffix(".csv")
-        convert_timeseries(infile, outfile)
+        convert_timeseries(infile, outfile, "unknown_1_FIXME")
         kv.append(
             {
                 "ordinate": float(ma.group(1)),
@@ -291,7 +290,7 @@ def parse_sediment_ripping_line(line, kv, bdir):
         fname = pathlib.Path(PureWindowsPath(ma.group(2)))
         infile = bdir / fname
         outfile = infile.with_suffix(".csv")
-        convert_timeseries(infile, outfile)
+        convert_timeseries(infile, outfile, "unknown_2_FIXME")
         kv.append(
             {"ordinate": float(ma.group(1)), "value": str(fname.with_suffix(".csv"))}
         )
