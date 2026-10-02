@@ -488,7 +488,7 @@ class GrateConfig(GrateBase):
             if b.type == "ts":
                 try:
                     val = pd.read_csv(val, index_col=0, parse_dates=True)[
-                        "flow"
+                        "water_level"
                     ].sort_index()
                     self._chk_csv_covers_timeperiod(f"Downstream ts {b.value}", val)
                 except Exception as exp:
@@ -519,7 +519,7 @@ class GrateConfig(GrateBase):
             if boundary.type == "ts":
                 try:
                     val = pd.read_csv(val, index_col=0, parse_dates=True)[
-                        "flow"
+                        "unknown_0_FIXME"
                     ].sort_index()
                     self._chk_csv_covers_timeperiod(
                         f"Sediment ts {boundary.value} at {boundary.ordinate}", val

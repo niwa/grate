@@ -1,6 +1,7 @@
 import math
 import numpy as np
 import pandas as pd
+import scipy
 from functools import lru_cache
 
 import utils
@@ -218,14 +219,17 @@ class QuasiSteadyModel(HydroDynamicModel):
                 return self.conservation_of_energy(t, i, d)
 
             try:
-                d = utils.newton(f, self.d[i + 1])
+                d = utils.find_root(f, x0=self.d[i + 1])
             except Exception as exp:
-                # d = np.arange(0.1, 1.1, 0.0001)
-                # fd = np.array([f(i) for i in d])
-                # df = pd.DataFrame({"d": d, "f": fd})
-                # df.to_csv("/tmp/f_values.csv", index=False)
+                d = np.arange(0.1, 3.1, 0.0001)
+                fd = np.array([f(i) for i in d])
+                df = pd.DataFrame({"d": d, "f": fd})
+                df = df[(-1 < df.f) & (df.f < 1)]
+                df.to_csv("/tmp/f_values.csv", index=False)
+                # run newton again recording values tried
+                d = utils.newton(f, self.d[i + 1], record=True)
                 raise RuntimeError(
-                    f"Newton failed at cross-section {i} chainage={self.cs[i]}"
+                    f"find_root failed at cross-section {i} chainage={self.cs[i]}"
                 ) from exp
 
             self.d[i] = d

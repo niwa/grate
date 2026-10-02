@@ -103,28 +103,13 @@ class LayerStack:
         ks = self._d90
 
         def f(ustar):
-            assert ustar > 0, f"Invalid {ustar=}"
             hs = ustar**2 / GRAVITY / Sf
             return ustar - u * KAPPA / math.log(11 * hs / ks)
 
         init = u * KAPPA / math.log(11 * hydro.d[self.chainidx] / ks)
 
-        # try:
-        #     ustar, info = scipy.optimize.newton(f_logged, init, full_output=True)
-        # except RuntimeError as e:
-        #     x = last_x
-        #     if x is not None:
-        #         for i in np.linspace(0.999 * x, 1.001 * x, 20):
-        #             print(i, f(i))
-        #         print(f"GSV, {u=} {Sf=} {ks=} {h=}")
-        #
-        #     raise ValueError(f"Can't solve grain_shear_velocity; last ustar={x}") from e
-        #
-        # if not info.converged:
-        #     raise ValueError(f"Can't solve grain_shear_velocity. {info=}")
-
         try:
-            ustar = utils.newton(f, init)
+            ustar = utils.find_root(f, init)
         except Exception as exp:
             raise RuntimeError(f"ustar newton fail t={t} cidx={self.chainidx}") from exp
 
