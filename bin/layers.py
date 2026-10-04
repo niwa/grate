@@ -1,7 +1,6 @@
-import math
 import numpy as np
 
-# import scipy.optimize
+import scipy
 import pandas as pd
 import utils
 from gin import CrossSectionProfile, GrateConfig
@@ -90,30 +89,73 @@ class LayerStack:
         u / u^* = 1/kappa ln(11 * hs / ks)
 
         u is channel water velocity
-        hs is flow depth attributable to grain roughness
+        hs is flow depth attributable to grain roughness and is u^*^2/g/Sf
         kappa is Von Kalman's constant, 0.4
         ks is the equivalent sand grain roughness = 2 d90
             where d90 is the 90th percentile of grain sizes in active layer
 
-        This is used in the Wilcock & Crowe (2003) formula for qb_jc
+        Used in the Wilcock & Crowe (2003) formula for qb_jc
+
+        Let x be u^*, so we have to solve
+
+            u KAPPA = x ln(11 * x^2 / g / Sf / ks)
+
+        Let
+            a = u KAPPA
+            b = 11 / (g * Sf * ks)
+        So the equation is
+            x ln (b x^2) - a = 0
+
+        This can be solved using a root finder from scipy, but given x must be
+        positive and the above function is not monotonic and potentially has
+        two roots, there are two broad
+        choices:
+            1. Use something like brentq, but all these methods require a
+            bracket which is potentially difficult (not monotonic)
+            2. Use a minimum solver on the square of the above which allows for
+            an initial guess and a lower bound (x > 0).
+
+        To use the second method we need the derivative
+
+            f(x)  = x ln (bx^2) - a
+            f'(x) = ln(bx^2) + x/(bx^2) * (2bx)
+                  = ln(bx^2) + 2
+            f''(x) = 2bx/bx^2 = 2/x
+        Let g(x) = f(x)^2, g'(x) = 2f(x)*f'(x), g''(x) = 2f'^2 + 2ff''
+
+        Or this can be solved analytically, the solution is
+            x = a / 2 / W(a sqrt(b) / 2)
+        where W is the lambertw
+
         """
 
-        u = hydro.u(t, self.chainidx)
         Sf = hydro.Sf(t, self.chainidx)
         ks = self._d90
 
-        def f(ustar):
-            hs = ustar**2 / GRAVITY / Sf
-            return ustar - u * KAPPA / math.log(11 * hs / ks)
+        a = KAPPA * hydro.u(t, self.chainidx)
+        b = 11 / GRAVITY / Sf / ks
 
-        init = u * KAPPA / math.log(11 * hydro.d[self.chainidx] / ks)
+        # def f(x):
+        #     return x * np.log(b * x**2) - a
+        #
+        # def fprime(x):
+        #     return np.log(b * x**2) + 2
+        #
+        # def fdouble(x):
+        #     return 2 / x
+        #
+        # x0 = a / np.log(11 * hydro.d[self.chainidx] / ks)
 
-        try:
-            ustar = utils.find_root(f, init)
-        except Exception as exp:
-            raise RuntimeError(f"ustar newton fail t={t} cidx={self.chainidx}") from exp
+        # try:
+        #     # ustar = utils.find_root_using_min(f, fprime, fdouble, x0)
+        #     ustar = utils.find_root(f, x0)
+        # except Exception as exp:
+        #     raise RuntimeError(f"ustar newton fail t={t} cidx={self.chainidx}") from exp
+        # return ustar
 
-        return ustar
+        x = a * np.sqrt(b) / 2
+        assert x > 0, "ustar calc, arg to lambertw <= 0, possibly complex solutions"
+        return (a / 2 / scipy.special.lambertw(x)).real
 
     def grain_stress(self, t: pd.Timestamp, hydro):
         """Grain stress tau_g

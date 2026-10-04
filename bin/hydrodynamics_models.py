@@ -215,21 +215,47 @@ class QuasiSteadyModel(HydroDynamicModel):
         for i in range(len(self.cs) - 2, -1, -1):
             # print(f"At chainidx {i}")
 
+            x0 = self.d[i + 1]
+
             def f(d):
                 return self.conservation_of_energy(t, i, d)
 
             try:
-                d = utils.find_root(f, x0=self.d[i + 1])
+                d = utils.find_root(f, x0=x0)
             except Exception as exp:
-                d = np.arange(0.1, 3.1, 0.0001)
-                fd = np.array([f(i) for i in d])
-                df = pd.DataFrame({"d": d, "f": fd})
-                df = df[(-1 < df.f) & (df.f < 1)]
-                df.to_csv("/tmp/f_values.csv", index=False)
+                depths = np.arange(0.0001, x0 * 3, 0.0001)
+                f = np.array([f(d) for d in depths])
+                Sfme = np.array([self.Sf(t, i, d) for d in depths])
+                Sfup = np.array([self.Sf(t, i + 1, d) for d in depths])
+                Sfupup = np.array([self.Sf(t, i + 2, d) for d in depths])
+                ume = np.array([self.u(t, i, d) for d in depths])
+                uup = np.array([self.u(t, i + 1, d) for d in depths])
+                uupup = np.array([self.u(t, i + 2, d) for d in depths])
+                S0me = self.S0(i)
+                S0up = self.S0(i + 1)
+                S0upup = self.S0(i + 2)
+                df = pd.DataFrame(
+                    {
+                        "d": depths,
+                        "f": f,
+                        "Sfme": Sfme,
+                        "Sfup": Sfup,
+                        "Sfupup": Sfupup,
+                        "ume": ume,
+                        "uup": uup,
+                        "uupup": uupup,
+                        "S0me": S0me,
+                        "S0up": S0up,
+                        "S0upup": S0upup,
+                    }
+                )
+                # df = df[(-1 < df.f) & (df.f < 1)]
+                df.to_csv("root_finding_failure_f_values.csv", index=False)
+                self._channel.xss[i].df.to_csv("failured_profile.csv", index=False)
                 # run newton again recording values tried
-                d = utils.newton(f, self.d[i + 1], record=True)
+                # d = utils.newton(f, self.d[i + 1], record=True)
                 raise RuntimeError(
-                    f"find_root failed at cross-section {i} chainage={self.cs[i]}"
+                    f"find_root failed at cross-section {i} chainage={self.cs[i]}, f saved in root_finding_failure_f_values.csv"
                 ) from exp
 
             self.d[i] = d
