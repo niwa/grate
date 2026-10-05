@@ -2,7 +2,6 @@ import numpy as np
 
 import scipy
 import pandas as pd
-import utils
 from gin import CrossSectionProfile, GrateConfig
 from grainprofile import get_representative_grain_sizes, get_grain_props
 
@@ -81,7 +80,7 @@ class LayerStack:
 
         return result
 
-    def grain_shear_velocity(self, t: pd.Timestamp, hydro):
+    def grain_shear_velocity(self, hydro):
         """Return grain shear velocity, u^*
 
         From equation 10.3
@@ -112,7 +111,7 @@ class LayerStack:
         """
 
         Sf = hydro.get_Sf(self.chainidx)
-        ks = self._d90
+        ks = 2 * self._d90
 
         a = KAPPA * hydro.get_u(self.chainidx)
         b = 11 / GRAVITY / Sf / ks
@@ -121,14 +120,14 @@ class LayerStack:
         assert x > 0, "ustar calc, arg to lambertw <= 0, possibly complex solutions"
         return (a / 2 / scipy.special.lambertw(x)).real
 
-    def grain_stress(self, t: pd.Timestamp, hydro):
+    def grain_stress(self, hydro):
         """Grain stress tau_g
 
         From equation 10.5
 
         rho grain_shear_velocity^2
         """
-        ustar = self.grain_shear_velocity(t, hydro)
+        ustar = self.grain_shear_velocity(hydro)
         return WATER_DENSITY * ustar**2
 
     def get_d90(self):
@@ -184,7 +183,7 @@ class LayerStack:
         # we must reverse since np.interp expects x-coord to increase
         return np.interp(-np.log(x), -np.log(self.rgsizes)[::-1], cf[::-1])
 
-    def qb_jli(self, t: pd.Timestamp, hydro):
+    def qb_jli(self, hydro):
         """Volumetric transport rate per unit width
 
         Wilcock & Crowe (2003), equation 9.33, qb_jc
@@ -205,9 +204,9 @@ class LayerStack:
         tau_rm = phirm * (s - 1) * WATER_DENSITY * GRAVITY * dsm
         b = 0.67 / (1 + np.exp(1.5 - rgsizes / dsm))  # (nbins, 1 )
         tau_rj = tau_rm * (rgsizes / dsm) ** b  # (nbins, nlith)
-        phi = self.grain_stress(t, hydro) / tau_rj  # (nbins, nlith)
+        phi = self.grain_stress(hydro) / tau_rj  # (nbins, nlith)
         Fj = self._acfd  # (nbins, nlith)
-        ustar = self.grain_shear_velocity(t, hydro)
+        ustar = self.grain_shear_velocity(hydro)
 
         q = Fj * ustar**3 / (s - 1) / GRAVITY  # (nbins, nlith)
 

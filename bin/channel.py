@@ -102,9 +102,9 @@ class Channel:
     def _get_sediment_bc(self):
         """Return"""
 
-    def area(self, c: int, d: float, loc: Loc | None = None):
-        """Return area of water between bed and bed+d"""
-        return self.xss[c].area(d, loc)
+    def area(self, c: int, wl: float, loc: Loc | None = None):
+        """Return area of water between bed and wl"""
+        return self.xss[c].area(wl, loc)
 
     def get_mean_bed_level(self, c: int):
         """Return mean bed level of profile at chainage c
@@ -118,30 +118,16 @@ class Channel:
         """Return deepest part of the cross-section"""
         return self.xss[c].min_bed_level
 
-    def S0(self, c: int):
-        """Bed slope at c
-
-        Bed slope is the slope between chainages of min_bed_level
-
-        Negative slope is downhill as we go downstream
-
-        """
-        assert c < self.nc - 1, (
-            f"Cannot calculate S0({c}), likely because this is the most downstream point"
-        )
-        dc = self.cs[c + 1] - self.cs[c]
-        return (self.get_min_bed_level(c + 1) - self.get_min_bed_level(c)) / dc
-
-    def Bwet(self, c: int, d: float):
+    def Bwet(self, c: int, wl: float):
         """Water surface width"""
-        return self.xss[c].Bwet(d)
+        return self.xss[c].Bwet(wl)
 
     def grain_stress(self, c: int, t: pd.Timestamp, hydro):
-        return self.xss[c].grain_stress(t, hydro)
+        return self.xss[c].grain_stress(hydro)
 
-    def get_Qb_jli(self, c: int, t: pd.Timestamp, hydro):
+    def get_Qb_jli(self, c: int, hydro):
         """Transport rate for this chainage"""
-        return self.xss[c].Qb_jli(t, hydro)
+        return self.xss[c].Qb_jli(hydro)
 
     def propogate_sediment(self, t: pd.Timestamp, hydro):
 
@@ -158,8 +144,8 @@ class Channel:
                 if self.cs[c - 1] <= sb.ordinate < self.cs[c]
             )
 
-            up_Qb_jli = self.xss[c - 1].Qb_jli(t, hydro) + bdy_sediment_rate
-            my_Qb_jli = self.xss[c].Qb_jli(t, hydro)
+            up_Qb_jli = self.xss[c - 1].Qb_jli(hydro) + bdy_sediment_rate
+            my_Qb_jli = self.xss[c].Qb_jli(hydro)
 
             fact = self.dt / dc / (1 - self.poro) / self.xss[c].Bchan()
             dy = (up_Qb_jli.sum() - my_Qb_jli.sum()) * fact
@@ -178,12 +164,12 @@ class Channel:
         self.max_deta_over_dt = max(dys)
         self._set_next_dt()
 
-    def conveyance(self, c: int, d: float):
-        return self.xss[c].conveyance(d)
+    def conveyance(self, c: int, wl: float):
+        return self.xss[c].conveyance(wl)
 
-    def R(self, c: int, d: float):
+    def R(self, c: int, wl: float):
         """Hydraulic radius A/P over entire xsection"""
-        return self.xss[c].R(d)
+        return self.xss[c].R(wl)
 
 
 class River(Channel):

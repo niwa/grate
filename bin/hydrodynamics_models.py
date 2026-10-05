@@ -23,18 +23,19 @@ class HydroDynamicModel:
         self.S0_array = []
 
     def initialize(self, t: pd.Timestamp):
-        """Set d to initial value."""
+        """Set water level (elevation above same datum cross-section profile y
+        uses) to initial value.
+        """
         # use the downstream for water level. 'normal' is a special case,
         # use wl_init
         tv = self._cfg._processed_downstream_boundary.value_at(t)
-        # this is elevation, we want depth
+        # this is elevation
         if "normal" in tv:
             v = tv["normal"]["wl_init"]
-            v -= self._channel.get_min_bed_level(len(self.cs) - 1)
         else:
-            v = self.get_ds_d(t)
+            v = self.get_ds_wl(t)
 
-        self.d = np.full(len(self.cs), v, dtype=float)
+        self.wl = np.full(len(self.cs), v, dtype=float)
 
     def beta(self):
         """Momentum correction factor"""
@@ -53,7 +54,7 @@ class HydroDynamicModel:
         """
         raise NotImplementedError(f"Q({t}, {c})")
 
-    def A(self, c: int, d: float | None = None, loc: Loc | None = None):
+    def A(self, c: int, wl: float | None = None, loc: Loc | None = None):
         """The area of the water at c chainage
 
         Parameters
@@ -61,29 +62,29 @@ class HydroDynamicModel:
         c: int
             Chainage point along river in units of dc
 
-        d: float
-            If None, then get the depth from self.d, else calculate for this
-            depth
+        wl: float
+            If None, then get the water level from self.wl, else calculate for this
+            water level
 
         loc: Loc
             If None, get the total area, otherwise just in this Loc (left, main
             channel, or right bank0
         """
-        if d is None:
-            d = self.d[c]
-        return self._channel.area(c, d, loc)
+        if wl is None:
+            wl = self.wl[c]
+        return self._channel.area(c, wl, loc)
 
     def get_u(self, c: int):
         """Previously calculated u"""
         return self._u_array[c]
 
-    def _u(self, t: pd.Timestamp, c: int, d: float | None = None):
+    def _u(self, t: pd.Timestamp, c: int, wl: float | None = None):
         """The mean velocity, ie Q/A"""
-        if d is None:
-            d = self.d[c]
-        return self.Q(t, c) / self.A(c, d)
+        if wl is None:
+            wl = self.wl[c]
+        return self.Q(t, c) / self.A(c, wl)
 
-    def conveyance(self, c: int, d: float | None = None):
+    def conveyance(self, c: int, wl: float | None = None):
         """K conveyance
 
         sum over left, main, right of
@@ -95,60 +96,62 @@ class HydroDynamicModel:
             ng is grain roughness
             nf is form roughness
         """
-        if d is None:
-            d = self.d[c]
-        return self._channel.conveyance(c, d)
+        if wl is None:
+            wl = self.wl[c]
+        return self._channel.conveyance(c, wl)
 
     def get_Sf(self, c: int):
         """Previously calculated Sf"""
         return self._Sf_array[c]
 
-    def _Sf(self, t: pd.Timestamp, c: int, d: float | None = None):
+    def _Sf(self, t: pd.Timestamp, c: int, wl: float | None = None):
         """Return friction slope, ie. Q abs(Q) / K^2"""
         Q = self.Q(t, c)
-        return Q * abs(Q) / self.conveyance(c, d) ** 2
+        return Q * abs(Q) / self.conveyance(c, wl) ** 2
 
     def _S0(self, c: int):
         """Bed slope at c"""
         return self._channel.S0(c)
 
-    def Bwet(self, c: int, d: float | None = None):
+    def Bwet(self, c: int, wl: float | None = None):
         """Water surface width"""
-        if d is None:
-            d = self.d[c]
-        return self._channel.Bwet(c, d)
+        if wl is None:
+            wl = self.wl[c]
+        return self._channel.Bwet(c, wl)
 
-    def R(self, c: int, d: float | None = None):
+    def R(self, c: int, wl: float | None = None):
         """Hydraulic radius A/P over entire xsection"""
-        if d is None:
-            d = self.d[c]
-        return self._channel.R(c, d)
+        if wl is None:
+            wl = self.wl[c]
+        return self._channel.R(c, wl)
 
-    def update_depth(self):
+    def update_water_level(self):
         raise NotImplementedError()
 
-    def get_ds_d(self, t: pd.Timestamp):
-        """Return downstream depth of water."""
+    def get_ds_wl(self, t: pd.Timestamp):
+        """Return downstream water level of water."""
         lastchain = len(self.cs) - 1
         tv = self._cfg._processed_downstream_boundary.value_at(t)
         if "elevation" in tv:
-            return tv["elevation"] - self._channel.get_min_bed_level(lastchain)
+            return tv["elevation"]
         if "depth" in tv:
-            return tv["depth"]
+            return tv["depth"] + self._channel.get_min_bed_level(lastchain)
         if "normal" in tv:
             slope = tv["normal"]["slope"]
             Q = self.Q(t, lastchain)
 
-            def f(d):
-                K = self.conveyance(lastchain, d)
+            def f(wl):
+                K = self.conveyance(lastchain, wl)
                 return Q - K * math.sqrt(slope)
 
             try:
-                d = utils.newton(f, self.d[lastchain])
+                wl = utils.find_root(
+                    f, self.wl[lastchain], self._channel.get_min_bed_level(lastchain)
+                )
             except Exception as exp:
-                raise RuntimeError("Newton failed doing downstream normal") from exp
+                raise RuntimeError("get_ds_wl failed to find root") from exp
 
-            return d
+            return wl
 
         raise ValueError(f"Unknown downstream boundary type: {tv['type']}")
 
@@ -171,7 +174,7 @@ class QuasiSteadyModel(HydroDynamicModel):
             pi.value_at(t) for pi in self._cfg._processed_inflow if pi.ordinate <= c
         )
 
-    def conservation_of_energy(self, t: pd.Timestamp, c: int, d: float):
+    def conservation_of_energy(self, t: pd.Timestamp, c: int, wl: float):
         """Calculate equation 5.7, the change in energy between me and
         downstream
 
@@ -180,7 +183,9 @@ class QuasiSteadyModel(HydroDynamicModel):
             - (h_(i+1) + (β_(i+1) u_(i+1)^2)/2g)
             + (S_0-S_f^*)Δx
 
-        h_0 is depth at most upstream
+        h_(i) is the water level (elevation above datum)
+        S_0 is ZERO since using water level
+        h_0 is water level at most upstream
         u is velocity of water.
         i is chain point index (c in this case)
 
@@ -188,23 +193,23 @@ class QuasiSteadyModel(HydroDynamicModel):
         """
 
         dc = self.cs[c + 1] - self.cs[c]
-        # sf = (self.Sf(t, c, d) + self.Sf(t, c + 1)) / 2
-        sf = (self._Sf(t, c, d) + self._Sf_array[c + 1]) / 2
+        # sf = (self.Sf(t, c, wl) + self.Sf(t, c + 1)) / 2
+        sf = (self._Sf(t, c, wl) + self._Sf_array[c + 1]) / 2
         g = 9.8
         f = (
-            d
-            # + (self.beta() * self.u(t, c, d) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
+            wl
+            # + (self.beta() * self.u(t, c, wl) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
             # / (2 * g)
             + self.beta()
-            * (self._u(t, c, d) ** 2 - self._u_array[c + 1] ** 2)
+            * (self._u(t, c, wl) ** 2 - self._u_array[c + 1] ** 2)
             / (2 * g)
-            - self.d[c + 1]
-            - (self.S0_array[c] + sf) * dc
+            - self.wl[c + 1]
+            - sf * dc
         )
         return f
 
-    def update_depth(self, t: pd.Timestamp):
-        """F
+    def update_water_level(self, t: pd.Timestamp):
+        """
 
         Parameters
         ----------
@@ -212,38 +217,49 @@ class QuasiSteadyModel(HydroDynamicModel):
             Timestep
         """
 
-        # get the most downstream depth
-        self.d[-1] = self.get_ds_d(t)
+        # get the most downstream water level
+        self.wl[-1] = self.get_ds_wl(t)
 
-        # get all the bed slopes
-        self.S0_array = [self._S0(c) for c in range(len(self.cs) - 1)]
-
-        # use d[i+1] to calculate d[i]
+        # use wl[i+1] to calculate wl[i]
         for i in range(len(self.cs) - 2, -1, -1):
-            x0 = self.d[i + 1]
             self._Sf_array[i + 1] = self._Sf(t, i + 1)
             self._u_array[i + 1] = self._u(t, i + 1)
 
             @lru_cache(maxsize=1000)
-            def f(d):
-                return self.conservation_of_energy(t, i, d)
+            def f(wl):
+                return self.conservation_of_energy(t, i, wl)
+
+            init_wl = (
+                self.wl[i + 1]
+                - self._channel.get_min_bed_level(i + 1)
+                + self._channel.get_min_bed_level(i)
+            )
 
             try:
-                d = utils.find_root(f, x0=x0)
+                wl = utils.find_root(
+                    f, x0=init_wl, lower=self._channel.get_min_bed_level(i)
+                )
+
             except Exception as exp:
-                depths = np.arange(0.0001, x0 * 3, 0.0001)
-                f = np.array([f(d) for d in depths])
-                df = pd.DataFrame({"d": depths, "f": f})
-                # df = df[(-1 < df.f) & (df.f < 1)]
+                wls = np.arange(
+                    self._channel.get_min_bed_level(i) + 0.0001,
+                    self._channel.get_min_bed_level(i) + 10.0,
+                    0.0001,
+                )
+                f = np.array([f(wl) for wl in wls])
+                Sfs = np.array([self._Sf(t, i, wl) for wl in wls])
+                us = np.array([self._u(t, i, wl) for wl in wls])
+                df = pd.DataFrame({"wl": wls, "f": f, "Sf": Sfs, "u": us})
+                df = df[(-1 < df.f) & (df.f < 1)]
                 df.to_csv("root_finding_failure_f_values.csv", index=False)
                 self._channel.xss[i].df.to_csv("failured_profile.csv", index=False)
-                # run newton again recording values tried
-                # d = utils.newton(f, self.d[i + 1], record=True)
+                print(f"Sf array = {self._Sf_array}")
+                print(f"u array = {self._u_array}")
                 raise RuntimeError(
                     f"find_root failed at cross-section {i} chainage={self.cs[i]}, f saved in root_finding_failure_f_values.csv"
                 ) from exp
 
-            self.d[i] = d
+            self.wl[i] = wl
             self._Sf_array[i] = self._Sf(t, i)
             self._u_array[i] = self._u(t, i)
 

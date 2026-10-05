@@ -265,13 +265,13 @@ class CrossSection:
         self.min_bed_level += dy
         self.mean_bed_level += dy
 
-    def grain_stress(self, t: pd.Timestamp, hydro):
-        return self.layers.grain_stress(t, hydro)
+    def grain_stress(self, hydro):
+        return self.layers.grain_stress(hydro)
 
+    # FIXME, min_bed_level not used after changing to wl
     @lru_cache(maxsize=1000)
-    def _wetted_segments(self, d: float, loc: Loc | None, min_bed_level: float):
+    def _wetted_segments(self, wl: float, loc: Loc | None, min_bed_level: float):
         """Yield roughness, perimeter, width and area for each wetted segment."""
-        water_level = min_bed_level + d
 
         profile = {
             Loc.LEFT: self.left,
@@ -288,28 +288,28 @@ class CrossSection:
 
         for x0, x1, y0, y1, rough in zip(x[:-1], x[1:], y[:-1], y[1:], r[1:]):
             # seg is above
-            if y0 > water_level and y1 > water_level:
+            if y0 > wl and y1 > wl:
                 continue
 
             # seg below water
-            if y0 <= water_level and y1 <= water_level:
+            if y0 <= wl and y1 <= wl:
                 peri = math.hypot(x1 - x0, y1 - y0)
                 width = x1 - x0
-                area = width * (water_level - (y0 + y1) / 2)
+                area = width * (wl - (y0 + y1) / 2)
 
             # seg crosses
             else:
-                f = (water_level - y0) / (y1 - y0)
+                f = (wl - y0) / (y1 - y0)
                 xc = x0 + f * (x1 - x0)
 
-                if y0 <= water_level:
+                if y0 <= wl:
                     # heading up
                     dx = xc - x0
-                    dy = water_level - y0
+                    dy = wl - y0
                 else:
                     # heading down
                     dx = x1 - xc
-                    dy = water_level - y1
+                    dy = wl - y1
 
                 peri = math.hypot(dx, dy)
                 width = dx
@@ -323,31 +323,31 @@ class CrossSection:
         """Return channel width"""
         return self.channel[-1, 0] - self.channel[0, 0]
 
-    def Bwet(self, d: float):
-        """Return water surface width for given depth."""
-        return self._Bwet_cached(d, self.min_bed_level)
+    def Bwet(self, wl: float):
+        """Return water surface width for given water level."""
+        return self._Bwet_cached(wl, self.min_bed_level)
 
-    def area(self, d: float, loc: Loc | None = None):
-        """Area of water below this height."""
-        return self._area_cached(d, loc, self.min_bed_level)
-
-    @lru_cache(maxsize=1000)
-    def _Bwet_cached(self, d: float, min_bed_level):
-        """Return water surface width for given depth."""
-        return sum(w for _, _, w, _ in self._wetted_segments(d, None, min_bed_level))
+    def area(self, wl: float, loc: Loc | None = None):
+        """Area of water below this water level."""
+        return self._area_cached(wl, loc, self.min_bed_level)
 
     @lru_cache(maxsize=1000)
-    def _area_cached(self, d: float, loc: Loc | None, min_bed_level):
-        """Area of water below this height."""
-        return sum(a for _, _, _, a in self._wetted_segments(d, loc, min_bed_level))
+    def _Bwet_cached(self, wl: float, min_bed_level):
+        """Return water surface width for given water level."""
+        return sum(w for _, _, w, _ in self._wetted_segments(wl, None, min_bed_level))
 
-    def _P(self, d: float, loc: Loc | None):
+    @lru_cache(maxsize=1000)
+    def _area_cached(self, wl: float, loc: Loc | None, min_bed_level):
+        """Area of water below this water level."""
+        return sum(a for _, _, _, a in self._wetted_segments(wl, loc, min_bed_level))
+
+    def _P(self, wl: float, loc: Loc | None):
         """Wetted perimeter for given water level."""
         return sum(
-            p for _, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level)
+            p for _, p, _, _ in self._wetted_segments(wl, loc, self.min_bed_level)
         )
 
-    def _nf(self, d: float, loc: Loc | None):
+    def _nf(self, wl: float, loc: Loc | None):
         """Return form roughness for the wetted cross-section.
 
         formrf * sum_k (r_k * p_k) / P
@@ -360,14 +360,14 @@ class CrossSection:
         peri = 0.0
         weighted_p = 0.0
 
-        for rough, p, _, _ in self._wetted_segments(d, loc, self.min_bed_level):
+        for rough, p, _, _ in self._wetted_segments(wl, loc, self.min_bed_level):
             peri += p
             weighted_p += rough * p
 
         # don't need to multiply by formrf since roughness already done that
         return weighted_p / peri
 
-    def Qb_jli(self, t: pd.Timestamp, hydro):
+    def Qb_jli(self, hydro):
         """Return bed material transport rate 2darray
 
         Parameters
@@ -381,8 +381,8 @@ class CrossSection:
             nbins x nlith 2d array.  (j, li) element is bed transport for li
             lith group and j proportion size
         """
-        return self.layers.qb_jli(t, hydro) * self._Bwet_cached(
-            hydro.d[self.chainidx], self.min_bed_level
+        return self.layers.qb_jli(hydro) * self._Bwet_cached(
+            hydro.wl[self.chainidx], self.min_bed_level
         )
 
     def update_alayer_proportions(self, df: np.ndarray):
@@ -395,7 +395,7 @@ class CrossSection:
         """Grain roughness in left/channel/right"""
         return 0.044 * self.d90(loc) ** (1 / 6)
 
-    def conveyance(self, d: float):
+    def conveyance(self, wl: float):
         """K conveyance
 
         sum over left, main, right of
@@ -408,13 +408,13 @@ class CrossSection:
             nf is form roughness
         """
         return self._conveyance_cached(
-            d,
+            wl,
             (self.ng(Loc.LEFT), self.ng(Loc.CHANNEL), self.ng(Loc.RIGHT)),
             self.min_bed_level,
         )
 
     @lru_cache(maxsize=1000)
-    def _conveyance_cached(self, d: float, ngs: tuple, min_bed_level: float):
+    def _conveyance_cached(self, wl: float, ngs: tuple, min_bed_level: float):
         """K conveyance
 
         sum over left, main, right of
@@ -431,18 +431,18 @@ class CrossSection:
         """
         K = 0
         for loc, ng in zip((Loc.LEFT, Loc.CHANNEL, Loc.RIGHT), ngs):
-            A = self._area_cached(d, loc, min_bed_level)
-            P = self._P(d, loc)
+            A = self._area_cached(wl, loc, min_bed_level)
+            P = self._P(wl, loc)
             if P == 0:
                 # no water in this part of channel
                 continue
             R = A / P
-            K += A * R ** (2 / 3) / (ng + self._nf(d, loc))
+            K += A * R ** (2 / 3) / (ng + self._nf(wl, loc))
 
         assert K > 0, "No water"
 
         return K
 
-    def R(self, d: float):
+    def R(self, wl: float):
         """Hydraulic radius A/P over entire xsection"""
-        return self._area_cached(d, None, self.min_bed_level) / self._P(d, None)
+        return self._area_cached(wl, None, self.min_bed_level) / self._P(wl, None)

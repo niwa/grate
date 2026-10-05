@@ -23,7 +23,7 @@ class Output:
         self._outfile = cfg.output.fname
 
         data_funs = {
-            "depth": self._get_depth,
+            "water_level": self._get_water_level,
             "velocity": self._get_velocity,
             "grain_stress": self._get_grain_stress,
             "total_transport_rate": self._get_total_transport_rate,
@@ -40,15 +40,15 @@ class Output:
         self._initialised = False
         self._epoch = None
 
-    def _get_depth(self):
-        return self._hmodel.d.copy()
+    def _get_water_level(self):
+        return self._hmodel.wl.copy()
 
-    def get_depth(self):
+    def get_water_level(self):
         return xr.DataArray(
-            self._get_depth(),
+            self._get_water_level(),
             dims=("chainage",),
             coords={"chainage": self._cs},
-            name="depth",
+            name="water_level",
         )
 
     def _get_velocity(self):
@@ -77,10 +77,7 @@ class Output:
 
     def _get_total_transport_rate(self):
         return np.array(
-            [
-                self._chan.get_Qb_jli(c, self.time, self._hmodel).sum()
-                for c in self._cidx
-            ]
+            [self._chan.get_Qb_jli(c, self._hmodel).sum() for c in self._cidx]
         )
 
     def get_total_transport_rate(self):
@@ -92,9 +89,7 @@ class Output:
         )
 
     def _get_transport_rate(self):
-        return np.array(
-            [self._chan.get_Qb_jli(c, self.time, self._hmodel) for c in self._cidx]
-        )
+        return np.array([self._chan.get_Qb_jli(c, self._hmodel) for c in self._cidx])
 
     def get_transport_rate(self):
         return xr.DataArray(

@@ -61,7 +61,7 @@ def run_model(infile: pathlib.Path):
 
     while t <= end:
         try:
-            hmodel.update_depth(t)
+            hmodel.update_water_level(t)
             if do_sediment_transport:
                 chan.propogate_sediment(t, hmodel)
         except Exception:

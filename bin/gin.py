@@ -305,7 +305,7 @@ class OutputOptions(GrateBase):
         typing.Literal["all"]
         | list[
             typing.Literal[
-                "depth",
+                "water_level",
                 "velocity",
                 "grain_stress",
                 "total_transport_rate",
@@ -368,7 +368,7 @@ class GrateConfig(GrateBase):
     def _load_output_variables(self):
         if self.output.variables == "all":
             self.output.variables = [
-                "depth",
+                "water_level",
                 "velocity",
                 "grain_stress",
                 "total_transport_rate",

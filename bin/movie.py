@@ -23,13 +23,13 @@ def _prepare_movie_data(ds: xr.Dataset, var: str, xdim: str, sels: dict[str, int
         The list consists of (variable name, dataarray) tuples
         The x values are what to plot on x axis
         Eg
-            [("depth", dataarray)], x dataarray
+            [("water_level", dataarray)], x dataarray
 
     """
 
-    """special case if var is elev.  plot min_bed_level and that plus depth"""
+    """special case if var is elev.  plot min_bed_level and water_level"""
     if var == "elev":
-        vnames = ["min_bed_level", "depth"]
+        vnames = ["min_bed_level", "water_level"]
     else:
         vnames = [var]
 
@@ -64,11 +64,11 @@ def _prepare_movie_data(ds: xr.Dataset, var: str, xdim: str, sels: dict[str, int
     # else:
     #     x = np.arange(first.sizes[xdim])
 
-    """special case if var is elev.  plot min_bed_level and that plus depth"""
+    """special case if var is elev.  plot min_bed_level and water_level"""
     if var == "elev":
         plot_data = [
             ("min_bed_level", data["min_bed_level"]),
-            ("elevation", data["min_bed_level"] + data["depth"]),
+            ("water_level", data["water_level"]),
         ]
     else:
         plot_data = [(var, data[var])]
@@ -133,7 +133,7 @@ def make_movie(
 def main():
     p = argparse.ArgumentParser(description="Make movie for xarray NetCDF variable")
     p.add_argument("inf", type=pathlib.Path, help="Input NetCDF")
-    p.add_argument("var", help="Variable to plot, eg depth ")
+    p.add_argument("var", help="Variable to plot, eg water_level ")
     p.add_argument("--xdim", default="chainage", help="x-axis dim, eg chainage")
     p.add_argument(
         "--sel",
