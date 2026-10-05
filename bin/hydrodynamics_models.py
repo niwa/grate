@@ -1,7 +1,6 @@
 import math
 import numpy as np
 import pandas as pd
-import scipy
 from functools import lru_cache
 
 import utils
@@ -15,6 +14,13 @@ class HydroDynamicModel:
         self._channel = chan
         self.cs = self._channel._chainpts()
         self.initialize(self._cfg.simulation_time.start)
+
+        # these are Sf and u for current timestep.  for caching
+        self._Sf_array = np.empty(len(self.cs))
+        self._u_array = np.empty(len(self.cs))
+
+        # store bed slope in here each iteration
+        self.S0_array = []
 
     def initialize(self, t: pd.Timestamp):
         """Set d to initial value."""
@@ -67,7 +73,11 @@ class HydroDynamicModel:
             d = self.d[c]
         return self._channel.area(c, d, loc)
 
-    def u(self, t: pd.Timestamp, c: int, d: float | None = None):
+    def get_u(self, c: int):
+        """Previously calculated u"""
+        return self._u_array[c]
+
+    def _u(self, t: pd.Timestamp, c: int, d: float | None = None):
         """The mean velocity, ie Q/A"""
         if d is None:
             d = self.d[c]
@@ -89,26 +99,16 @@ class HydroDynamicModel:
             d = self.d[c]
         return self._channel.conveyance(c, d)
 
-        # K = 0
-        # for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT):
-        #     A = self.A(c, d, loc)
-        #     P = self.P(c, d, loc)
-        #     if P == 0:
-        #         # no water in this part of channel
-        #         continue
-        #     R = A / P
-        #     K += A * R ** (2 / 3) / (self.ng(c, loc) + self.nf(c, d, loc))
-        #
-        # assert K > 0, "No water"
-        #
-        # return K
+    def get_Sf(self, c: int):
+        """Previously calculated Sf"""
+        return self._Sf_array[c]
 
-    def Sf(self, t: pd.Timestamp, c: int, d: float | None = None):
+    def _Sf(self, t: pd.Timestamp, c: int, d: float | None = None):
         """Return friction slope, ie. Q abs(Q) / K^2"""
         Q = self.Q(t, c)
         return Q * abs(Q) / self.conveyance(c, d) ** 2
 
-    def S0(self, c: int):
+    def _S0(self, c: int):
         """Bed slope at c"""
         return self._channel.S0(c)
 
@@ -188,14 +188,18 @@ class QuasiSteadyModel(HydroDynamicModel):
         """
 
         dc = self.cs[c + 1] - self.cs[c]
-        sf = (self.Sf(t, c, d) + self.Sf(t, c + 1)) / 2
+        # sf = (self.Sf(t, c, d) + self.Sf(t, c + 1)) / 2
+        sf = (self._Sf(t, c, d) + self._Sf_array[c + 1]) / 2
         g = 9.8
         f = (
             d
-            + (self.beta() * self.u(t, c, d) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
+            # + (self.beta() * self.u(t, c, d) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
+            # / (2 * g)
+            + self.beta()
+            * (self._u(t, c, d) ** 2 - self._u_array[c + 1] ** 2)
             / (2 * g)
             - self.d[c + 1]
-            + (-self.S0(c) - sf) * dc
+            - (self.S0_array[c] + sf) * dc
         )
         return f
 
@@ -211,12 +215,16 @@ class QuasiSteadyModel(HydroDynamicModel):
         # get the most downstream depth
         self.d[-1] = self.get_ds_d(t)
 
+        # get all the bed slopes
+        self.S0_array = [self._S0(c) for c in range(len(self.cs) - 1)]
+
         # use d[i+1] to calculate d[i]
         for i in range(len(self.cs) - 2, -1, -1):
-            # print(f"At chainidx {i}")
-
             x0 = self.d[i + 1]
+            self._Sf_array[i + 1] = self._Sf(t, i + 1)
+            self._u_array[i + 1] = self._u(t, i + 1)
 
+            @lru_cache(maxsize=1000)
             def f(d):
                 return self.conservation_of_energy(t, i, d)
 
@@ -225,30 +233,7 @@ class QuasiSteadyModel(HydroDynamicModel):
             except Exception as exp:
                 depths = np.arange(0.0001, x0 * 3, 0.0001)
                 f = np.array([f(d) for d in depths])
-                Sfme = np.array([self.Sf(t, i, d) for d in depths])
-                Sfup = np.array([self.Sf(t, i + 1, d) for d in depths])
-                Sfupup = np.array([self.Sf(t, i + 2, d) for d in depths])
-                ume = np.array([self.u(t, i, d) for d in depths])
-                uup = np.array([self.u(t, i + 1, d) for d in depths])
-                uupup = np.array([self.u(t, i + 2, d) for d in depths])
-                S0me = self.S0(i)
-                S0up = self.S0(i + 1)
-                S0upup = self.S0(i + 2)
-                df = pd.DataFrame(
-                    {
-                        "d": depths,
-                        "f": f,
-                        "Sfme": Sfme,
-                        "Sfup": Sfup,
-                        "Sfupup": Sfupup,
-                        "ume": ume,
-                        "uup": uup,
-                        "uupup": uupup,
-                        "S0me": S0me,
-                        "S0up": S0up,
-                        "S0upup": S0upup,
-                    }
-                )
+                df = pd.DataFrame({"d": depths, "f": f})
                 # df = df[(-1 < df.f) & (df.f < 1)]
                 df.to_csv("root_finding_failure_f_values.csv", index=False)
                 self._channel.xss[i].df.to_csv("failured_profile.csv", index=False)
@@ -259,6 +244,8 @@ class QuasiSteadyModel(HydroDynamicModel):
                 ) from exp
 
             self.d[i] = d
+            self._Sf_array[i] = self._Sf(t, i)
+            self._u_array[i] = self._u(t, i)
 
 
 class DynamicWaveModel(HydroDynamicModel):

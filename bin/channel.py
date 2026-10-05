@@ -166,8 +166,6 @@ class Channel:
             self.xss[c].aggrade_bed(dy)
             dys.append(dy)
 
-            # print(c, my_Qb_jli.sum())
-
             p = my_Qb_jli / my_Qb_jli.sum()
             df = (
                 (up_Qb_jli - my_Qb_jli) * fact - self.xss[c].f_interface(dy > 0, p) * dy

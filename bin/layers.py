@@ -106,52 +106,16 @@ class LayerStack:
         So the equation is
             x ln (b x^2) - a = 0
 
-        This can be solved using a root finder from scipy, but given x must be
-        positive and the above function is not monotonic and potentially has
-        two roots, there are two broad
-        choices:
-            1. Use something like brentq, but all these methods require a
-            bracket which is potentially difficult (not monotonic)
-            2. Use a minimum solver on the square of the above which allows for
-            an initial guess and a lower bound (x > 0).
-
-        To use the second method we need the derivative
-
-            f(x)  = x ln (bx^2) - a
-            f'(x) = ln(bx^2) + x/(bx^2) * (2bx)
-                  = ln(bx^2) + 2
-            f''(x) = 2bx/bx^2 = 2/x
-        Let g(x) = f(x)^2, g'(x) = 2f(x)*f'(x), g''(x) = 2f'^2 + 2ff''
-
-        Or this can be solved analytically, the solution is
+        This can be solved `analytically`, the solution is
             x = a / 2 / W(a sqrt(b) / 2)
         where W is the lambertw
-
         """
 
-        Sf = hydro.Sf(t, self.chainidx)
+        Sf = hydro.get_Sf(self.chainidx)
         ks = self._d90
 
-        a = KAPPA * hydro.u(t, self.chainidx)
+        a = KAPPA * hydro.get_u(self.chainidx)
         b = 11 / GRAVITY / Sf / ks
-
-        # def f(x):
-        #     return x * np.log(b * x**2) - a
-        #
-        # def fprime(x):
-        #     return np.log(b * x**2) + 2
-        #
-        # def fdouble(x):
-        #     return 2 / x
-        #
-        # x0 = a / np.log(11 * hydro.d[self.chainidx] / ks)
-
-        # try:
-        #     # ustar = utils.find_root_using_min(f, fprime, fdouble, x0)
-        #     ustar = utils.find_root(f, x0)
-        # except Exception as exp:
-        #     raise RuntimeError(f"ustar newton fail t={t} cidx={self.chainidx}") from exp
-        # return ustar
 
         x = a * np.sqrt(b) / 2
         assert x > 0, "ustar calc, arg to lambertw <= 0, possibly complex solutions"

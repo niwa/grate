@@ -52,7 +52,7 @@ class Output:
         )
 
     def _get_velocity(self):
-        return np.array([self._hmodel.u(self.time, c) for c in self._cidx])
+        return np.array([self._hmodel.get_u(c) for c in self._cidx])
 
     def get_velocity(self):
         return xr.DataArray(
