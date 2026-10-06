@@ -54,7 +54,7 @@ class HydroDynamicModel:
         """
         raise NotImplementedError(f"Q({t}, {c})")
 
-    def A(self, c: int, wl: float | None = None, loc: Loc | None = None):
+    def A(self, c: int, wl: float | None = None):
         """The area of the water at c chainage
 
         Parameters
@@ -72,7 +72,7 @@ class HydroDynamicModel:
         """
         if wl is None:
             wl = self.wl[c]
-        return self._channel.area(c, wl, loc)
+        return self._channel.area(c, wl, Loc.ALL)
 
     def get_u(self, c: int):
         """Previously calculated u"""
