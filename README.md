@@ -28,7 +28,7 @@ directory, and update your path.  Open a terminal and run `grate --help`
 
 ### Testing
 
-pytest bin/tests/ -v
+pytest tests/ -v
 
 ## Installer
 

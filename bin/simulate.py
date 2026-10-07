@@ -34,9 +34,10 @@ def run_model(infile: pathlib.Path):
         return f"Q: {q}\nws {w}\nbw {b}\na  {a}\nc {c}\nng {ng}"
 
     with open(infile) as f:
+        print("Parsing config and boundary conditions...", end="", flush=True)
         cfg = GrateConfig.model_validate(yaml.safe_load(f))
 
-    print("Creating channel...", end="", flush=True)
+    print("done\nCreating channel...", end="", flush=True)
     chan = {"flume": River, "river": River, "braided_channel": BraidedChannel}[
         cfg.model.channel_type
     ](cfg)
@@ -96,9 +97,10 @@ def run_model(infile: pathlib.Path):
 
         step += 1
         dt = pd.Timedelta(seconds=chan.get_dt())
+        t += dt
 
         # if above qthres increase dt and don't do sediment transport
-        if hmodel.Q(t, len(hmodel.cs) - 1) < cfg.morphological.qthres:
+        if hmodel.get_flow(len(hmodel.cs) - 1) < cfg.morphological.qthres:
             dt = pd.Timedelta(
                 seconds=cfg.simulation_time.max_dt_qs
                 * cfg.morphological.qthres_dtmultiplier
@@ -106,8 +108,6 @@ def run_model(infile: pathlib.Path):
             do_sediment_transport = False
         else:
             do_sediment_transport = True
-
-        t += dt
 
     print()
 

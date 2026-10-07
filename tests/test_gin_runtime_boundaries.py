@@ -1,30 +1,112 @@
-"""
-Unit tests for the Runtime*Boundary classes in gin.py (time-series lookup /
-interpolation helpers).
-
-IMPORTANT: these tests import gin.py directly, which currently fails at
-import time (see bug #1 in the review notes: `processed_sediment_boundary`
-must be `_processed_sediment_boundary` for pydantic to accept it as a
-PrivateAttr). Apply that one-line rename before running this file.
-"""
-
 import pandas as pd
+import numpy as np
 import pytest
+from pathlib import Path
+
+TEST_DATA = Path(__file__).parent / "data"
 
 from gin import (
     RuntimeInflowBoundary,
     RuntimeDownstreamBoundary,
     RuntimeSedimentBoundary,
+    InflowBoundaryConst,
+    InflowBoundaryTS,
 )
 
 
 class TestRuntimeInflowBoundaryConst:
-    def test_const_returns_value_regardless_of_time(self):
-        b = RuntimeInflowBoundary(ordinate=0.0, type="const", value=42.0)
-        assert b.value_at(pd.Timestamp("2020-01-01")) == 42.0
-        assert b.value_at(pd.Timestamp("2030-01-01")) == 42.0
+    @pytest.fixture
+    def cib(self):
+        ibs = [
+            InflowBoundaryConst(ordinate=0.0, type="const", value=42.0),
+            InflowBoundaryConst(ordinate=-5.0, type="const", value=12.0),
+            InflowBoundaryConst(ordinate=15.0, type="const", value=15.0),
+        ]
+        start = pd.Timestamp("2020-01-01")
+        end = pd.Timestamp("2021-01-01")
+        return RuntimeInflowBoundary(ibs, start, end)
+
+    def test_const_returns_value_regardless_of_time(self, cib):
+        np.testing.assert_array_equal(
+            cib.get_flows(pd.Timestamp("2020-01-01")), [12, 54, 69]
+        )
+
+    def test_rechainage(self, cib):
+        cib.rechainage((-3, -6, -2, 0, 10, 25))
+        np.testing.assert_array_equal(
+            cib.get_flows(pd.Timestamp("2020-01-01")), [0, 12, 12, 54, 54, 69]
+        )
+
+    @pytest.fixture
+    def vib(self):
+        ibs = [
+            InflowBoundaryTS(
+                ordinate=0.0, type="ts", value=TEST_DATA / "inflow_messy_bc_0.0.csv"
+            ),
+            InflowBoundaryConst(ordinate=-5.0, type="const", value=12.0),
+            InflowBoundaryTS(
+                ordinate=15.0, type="ts", value=TEST_DATA / "inflow_messy_bc_15.0.csv"
+            ),
+        ]
+        start = pd.Timestamp("2020-01-01 10:0:0")
+        end = pd.Timestamp("2020-01-02 3:0:0")
+        return RuntimeInflowBoundary(ibs, start, end)
+
+    def test_get_flows(self, vib):
+        np.testing.assert_array_equal(
+            vib.get_flows(pd.Timestamp("2020-01-01 23:51:00")),
+            [12.0, 29.333, 50.433],
+        )
+        np.testing.assert_allclose(
+            vib.get_flows(pd.Timestamp("2020-01-01 13:40:00")),
+            [12, 15.39, 5.128843],
+        )
+
+    def test_messy_rechainge(self, vib):
+        vib.rechainage((-5, -6, -2, 0, 3, 6, 25))
+        np.testing.assert_allclose(
+            vib.get_flows(pd.Timestamp("2020-01-01 13:40:00")),
+            [0, 12, 12, 15.39, 15.39, 15.39, 5.128843],
+        )
+
+    @pytest.fixture
+    def vib_simple(self):
+        ibs = [
+            InflowBoundaryTS(
+                ordinate=2.0, type="ts", value=TEST_DATA / "inflow_simple_bc_2.0.csv"
+            ),
+            InflowBoundaryConst(ordinate=-5.0, type="const", value=12.0),
+            InflowBoundaryTS(
+                ordinate=7.0, type="ts", value=TEST_DATA / "inflow_simple_bc_7.0.csv"
+            ),
+        ]
+        start = pd.Timestamp("2010-01-01 02:0:0")
+        end = pd.Timestamp("2010-01-01 6:0:0")
+        return RuntimeInflowBoundary(ibs, start, end)
+
+    def test_get_flows_simple(self, vib_simple):
+        np.testing.assert_array_equal(
+            vib_simple.get_flows(pd.Timestamp("2010-01-01 4:0:0")),
+            [12.0, 16, 30],
+        )
+        np.testing.assert_array_equal(
+            vib_simple.get_flows(pd.Timestamp("2010-01-01 3:30:0")),
+            [12.0, 15.5, 29],
+        )
+
+    def test_simple_rechainge(self, vib_simple):
+        vib_simple.rechainage((-5, -6, -2, 0, 3, 6, 25))
+        np.testing.assert_array_equal(
+            vib_simple.get_flows(pd.Timestamp("2010-01-01 4:0:0")),
+            [0, 12, 12, 12, 16, 16, 30],
+        )
+        np.testing.assert_array_equal(
+            vib_simple.get_flows(pd.Timestamp("2010-01-01 1:30:0")),
+            [0, 12, 12, 12, 13.5, 13.5, 25],
+        )
 
 
+"""
 class TestRuntimeInflowBoundaryTS:
     @pytest.fixture
     def series(self):
@@ -49,31 +131,31 @@ class TestRuntimeInflowBoundaryTS:
         b = RuntimeInflowBoundary(ordinate=0.0, type="ts", value=series)
         assert b.value_at(pd.Timestamp("2021-01-01")) == 40.0
 
+"""
+
 
 class TestRuntimeDownstreamBoundary:
     def test_elevation_type(self):
-        b = RuntimeDownstreamBoundary(ordinate=0.0, type="elevation", value=5.0)
+        b = RuntimeDownstreamBoundary(type="elevation", value=5.0)
         result = b.value_at(pd.Timestamp("2020-01-01"))
         assert result == {"elevation": 5.0}
 
     def test_depth_type(self):
-        b = RuntimeDownstreamBoundary(ordinate=0.0, type="depth", value=1.5)
+        b = RuntimeDownstreamBoundary(type="depth", value=1.5)
         result = b.value_at(pd.Timestamp("2020-01-01"))
         assert result == {"depth": 1.5}
 
     def test_normal_type(self):
-        b = RuntimeDownstreamBoundary(ordinate=0.0, type="normal", value=None)
+        b = RuntimeDownstreamBoundary(type="normal", value=None)
         b.slope = 0.001
-        b.hinit = 2.0
+        b.wl_init = 2.0
         result = b.value_at(pd.Timestamp("2020-01-01"))
-        assert result == {"normal": {"slope": 0.001, "hinit": 2.0}}
+        assert result == {"normal": {"slope": 0.001, "wl_init": 2.0}}
 
     def test_ts_interpolation_returns_elevation_key(self):
         idx = pd.to_datetime(["2020-01-01", "2020-01-02"])
         series = pd.Series([1.0, 3.0], index=idx)
-        b = RuntimeDownstreamBoundary(
-            ordinate=0.0, type="elevation_timeseries", value=series
-        )
+        b = RuntimeDownstreamBoundary(type="elevation_timeseries", value=series)
         result = b.value_at(pd.Timestamp("2020-01-01 12:00"))
         assert result == {"elevation": pytest.approx(2.0)}
 

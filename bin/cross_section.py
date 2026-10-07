@@ -507,7 +507,7 @@ class CrossSection:
         # the ng cache needs invalidating since acfd change means d90 changes
         self.ng.cache_clear()
 
-    @lru_cache(maxsize=1000)
+    @lru_cache(maxsize=10000)
     def ng(self, loc: Loc):
         """Grain roughness in left/channel/right"""
         return 0.044 * self.d90(loc) ** (1 / 6)
@@ -530,7 +530,7 @@ class CrossSection:
             self.min_bed_level,
         )
 
-    @lru_cache(maxsize=1000)
+    @lru_cache(maxsize=10000)
     def _conveyance_cached(self, wl: float, ngs: tuple, min_bed_level: float):
         """K conveyance
 
