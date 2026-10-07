@@ -106,35 +106,135 @@ InflowBoundary = typing.Annotated[
 ]
 
 
-@dataclass
 class RuntimeInflowBoundary:
-    ordinate: float
-    type: str
-    value: float | pd.Series
+    """Combine all the inflow boundary conditions into one datastructure.
 
-    def value_at(self, t: pd.Timestamp) -> float:
-        if self.type == "const":
-            return self.value
+    If all the inflow BCs are constant, then we can just store the cumsum of
+    the flows downstream.  Otherwise we store a dataframe with time index and a
+    column for each chainage (some columns might be constant).  This is
+    converted to cumulative downstream flow so we can quickly get the inflow at all chainages.
 
-        s = self.value
-        if t in s.index:
-            return float(s.loc[t])
+    The rows are trimmed so we don't store data outside the simulation time
+    domain.
+
+    After the list of chainages is known (the model may do interpolation) this
+    class allows the chainages to be resampled (using constant flat resampling
+    which is what flow should be resampled as)
+    """
+
+    def __init__(self, ibs: list, start, end):
+        """Take a list of inflowboundaries and convert to list or dataframe"""
+
+        if not ibs:
+            raise ValueError("At least one inflow boundary is required")
+
+        if len({ib.ordinate for ib in ibs}) != len(ibs):
+            raise ValueError("Inflow boundary ordinates must be unique")
+
+        # if all inflows are constant, we just store a simple 2d array for flow
+        self.__const = False
+
+        if all(isinstance(ib, InflowBoundaryConst) for ib in ibs):
+            self.__const = True
+            # first column is chainage, second is the values
+            vals = np.array([(ib.ordinate, ib.value) for ib in ibs])
+            vals = vals[np.argsort(vals[:, 0])]
+            vals[:, 1] = vals[:, 1].cumsum()
+            self.__flows = vals
+            return
+
+        # so at least one of the inflows is a timeseries, put everything into
+        # dataframe
+        #
+        # first gather into a list of series since the time indices might not
+        # match
+        seris = []
+        for ib in ibs:
+            if ib.type == "ts":
+                try:
+                    seri = pd.read_csv(ib.value, index_col=0, parse_dates=True)[
+                        "flow"
+                    ].sort_index()
+                    if start < seri.index[0] or seri.index[-1] < end:
+                        raise ValueError(
+                            f"{ib.value} does not cover the simulation period "
+                            f"{start} to {end}; "
+                            f"timeseries covers {seri.index[0]} to {seri.index[-1]}"
+                        )
+                except Exception as exp:
+                    raise ValueError(f"Could not parse {ib.value}: {exp}")
+                # only bother with storing the time domain necessary
+                i0 = seri.index.searchsorted(start, side="left")
+                i1 = seri.index.searchsorted(end, side="right")
+                seri = seri.iloc[max(0, i0 - 1) : min(len(seri), i1 + 1)]
+                seri = seri.rename(ib.ordinate)
+                seris.append(seri)
+
+        df = pd.concat(seris, axis=1, sort=True)
+
+        # some seri might have had different time index
+        df = df.interpolate(method="time")
+
+        # add in the constant bcs
+        for ib in ibs:
+            if ib.type == "const":
+                df[ib.ordinate] = ib.value
+
+        # finally sort the columns so we can cumsum
+        df = df.sort_index(axis=1)
+        df = df.cumsum(axis=1)
+
+        self.__flows = df
+
+    def get_flows(self, t: pd.Timestamp):
+        """Return the downstream flows at current chainages."""
+        if self.__const:
+            return self.__flows[:, 1]
+
+        if t in self.__flows.index:
+            return self.__flows.loc[t].to_numpy()
 
         # have to interpolate
-        pos = s.index.searchsorted(t)
+        pos = self.__flows.index.searchsorted(t)
 
         # bounds check
         if pos == 0:
-            return float(s.iloc[0])
-        if pos == len(s):
-            return float(s.iloc[-1])
+            return self.__flows.iloc[0].to_numpy()
+        if pos == len(self.__flows):
+            return self.__flows.iloc[-1].to_numpy()
 
-        t0 = s.index[pos - 1]
-        t1 = s.index[pos]
-        v0 = s.iloc[pos - 1]
-        v1 = s.iloc[pos]
+        t0 = self.__flows.index[pos - 1]
+        t1 = self.__flows.index[pos]
+        v0 = self.__flows.iloc[pos - 1].to_numpy()
+        v1 = self.__flows.iloc[pos].to_numpy()
         fraction = (t - t0) / (t1 - t0)
-        return float(v0 + fraction * (v1 - v0))
+        return v0 + fraction * (v1 - v0)
+
+    def rechainage(self, cs):
+        """Update the flows because new chainage"""
+
+        cs = np.sort(np.asarray(cs))
+
+        if self.__const:
+            idx = np.searchsorted(self.__flows[:, 0], cs, side="right") - 1
+            values = np.zeros(len(cs), dtype=self.__flows.dtype)
+            mask = idx >= 0
+            values[mask] = self.__flows[idx[mask], 1]
+            self.__flows = np.column_stack((cs, values))
+            return
+
+        old_cs = self.__flows.columns.to_numpy()
+        idx = np.searchsorted(old_cs, cs, side="right") - 1
+
+        values = np.zeros((len(self.__flows), len(cs)))
+        mask = idx >= 0
+        values[:, mask] = self.__flows.to_numpy()[:, idx[mask]]
+
+        self.__flows = pd.DataFrame(
+            values,
+            index=self.__flows.index,
+            columns=cs,
+        )
 
 
 @dataclass
@@ -232,7 +332,7 @@ SedimentBoundary = typing.Annotated[
 
 
 @dataclass
-class RuntimeSedimentBoundary(RuntimeInflowBoundary):
+class RuntimeSedimentBoundary:
     ordinate: float
     type: str
     nbins: int
@@ -327,7 +427,7 @@ class GrateConfig(GrateBase):
     cross_sections: CrossSections
 
     inflow_boundary: list[InflowBoundary]
-    _processed_inflow: list[RuntimeInflowBoundary] = p.PrivateAttr(default_factory=list)
+    _processed_inflow: RuntimeInflowBoundary
     downstream_boundary: DownstreamBoundary
     _processed_downstream_boundary: RuntimeDownstreamBoundary = p.PrivateAttr(
         default=None
@@ -358,7 +458,9 @@ class GrateConfig(GrateBase):
         self._check_discretisation()
         self._check_cross_sections()
         self._check_grain_size()
-        self._load_inflow_timeseries()
+        self._processed_inflow = RuntimeInflowBoundary(
+            self.inflow_boundary, self.simulation_time.start, self.simulation_time.end
+        )
         self._load_downstream_boundary()
         self._load_sediment_boundary_timeseries()
         self._check_sediment_boundary()
@@ -455,6 +557,7 @@ class GrateConfig(GrateBase):
                 f"timeseries covers {seri.index[0]} to {seri.index[-1]}"
             )
 
+    """
     def _load_inflow_timeseries(self):
         self._processed_inflow.clear()
         for boundary in self.inflow_boundary:
@@ -476,6 +579,7 @@ class GrateConfig(GrateBase):
                     value=val,
                 )
             )
+    """
 
     def _load_downstream_boundary(self):
         b = self.downstream_boundary

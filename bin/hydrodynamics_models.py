@@ -15,12 +15,16 @@ class HydroDynamicModel:
         self.cs = self._channel._chainpts()
         self.initialize(self._cfg.simulation_time.start)
 
-        # these are Sf and u for current timestep.  for caching
+        # cache these variables for current tempstep
         self._Sf_array = np.empty(len(self.cs))
         self._u_array = np.empty(len(self.cs))
+        self._flow_array = np.empty(len(self.cs))
+
+        # make sure the inflow boundary conditions know about (potentially) new chainage
+        cfg._processed_inflow.rechainage(self.cs)
 
         # store bed slope in here each iteration
-        self.S0_array = []
+        # self.S0_array = []
 
     def initialize(self, t: pd.Timestamp):
         """Set water level (elevation above same datum cross-section profile y
@@ -37,24 +41,14 @@ class HydroDynamicModel:
 
         self.wl = np.full(len(self.cs), v, dtype=float)
 
+        # get starting flow
+        self._flow_array = self._cfg._processed_inflow.get_flows(t)
+
     def beta(self):
         """Momentum correction factor"""
         return self._cfg.morphological.beta
 
-    def Q(self, t: pd.Timestamp, c: int):
-        """Return flow at point along river
-
-        Parameters
-        ----------
-        c: int
-            Chainage index along river in units of dc
-
-        t: pd.Timestamp
-            Time
-        """
-        raise NotImplementedError(f"Q({t}, {c})")
-
-    def A(self, c: int, wl: float | None = None, loc: Loc | None = None):
+    def A(self, c: int, wl: float | None = None):
         """The area of the water at c chainage
 
         Parameters
@@ -72,17 +66,21 @@ class HydroDynamicModel:
         """
         if wl is None:
             wl = self.wl[c]
-        return self._channel.area(c, wl, loc)
+        return self._channel.area(c, wl, Loc.ALL)
 
     def get_u(self, c: int):
         """Previously calculated u"""
         return self._u_array[c]
 
-    def _u(self, t: pd.Timestamp, c: int, wl: float | None = None):
-        """The mean velocity, ie Q/A"""
+    def get_flow(self, c: int):
+        """Previously calculated flow"""
+        return self._flow_array[c]
+
+    def _u(self, c: int, wl: float | None = None):
+        """The mean velocity, ie Q/A at current step"""
         if wl is None:
             wl = self.wl[c]
-        return self.Q(t, c) / self.A(c, wl)
+        return self._flow_array[c] / self.A(c, wl)
 
     def conveyance(self, c: int, wl: float | None = None):
         """K conveyance
@@ -104,14 +102,14 @@ class HydroDynamicModel:
         """Previously calculated Sf"""
         return self._Sf_array[c]
 
-    def _Sf(self, t: pd.Timestamp, c: int, wl: float | None = None):
+    def _Sf(self, c: int, wl: float | None = None):
         """Return friction slope, ie. Q abs(Q) / K^2"""
-        Q = self.Q(t, c)
+        Q = self._flow_array[c]
         return Q * abs(Q) / self.conveyance(c, wl) ** 2
 
-    def _S0(self, c: int):
-        """Bed slope at c"""
-        return self._channel.S0(c)
+    # def _S0(self, c: int):
+    #     """Bed slope at c"""
+    #     return self._channel.S0(c)
 
     def Bwet(self, c: int, wl: float | None = None):
         """Water surface width"""
@@ -157,24 +155,24 @@ class HydroDynamicModel:
 
 
 class QuasiSteadyModel(HydroDynamicModel):
-    @lru_cache(maxsize=400)
-    def Q(self, t: pd.Timestamp, c: int):
-        """Return flow at point along river
+    # @lru_cache(maxsize=4000)
+    # def Q(self, t: pd.Timestamp, c: int):
+    #     """Return flow at point along river
+    #
+    #     Parameters
+    #     ----------
+    #     c: int
+    #         Chainage point along river in dc units
+    #
+    #     t: pd.Timestamp
+    #         Time
+    #     """
+    #     c = self.cs[c]  # convert index to chainage
+    #     return sum(
+    #         pi.value_at(t) for pi in self._cfg._processed_inflow if pi.ordinate <= c
+    #     )
 
-        Parameters
-        ----------
-        c: int
-            Chainage point along river in dc units
-
-        t: pd.Timestamp
-            Time
-        """
-        c = self.cs[c]  # convert index to chainage
-        return sum(
-            pi.value_at(t) for pi in self._cfg._processed_inflow if pi.ordinate <= c
-        )
-
-    def conservation_of_energy(self, t: pd.Timestamp, c: int, wl: float):
+    def conservation_of_energy(self, c: int, wl: float):
         """Calculate equation 5.7, the change in energy between me and
         downstream
 
@@ -193,16 +191,13 @@ class QuasiSteadyModel(HydroDynamicModel):
         """
 
         dc = self.cs[c + 1] - self.cs[c]
-        # sf = (self.Sf(t, c, wl) + self.Sf(t, c + 1)) / 2
-        sf = (self._Sf(t, c, wl) + self._Sf_array[c + 1]) / 2
+        sf = (self._Sf(c, wl) + self._Sf_array[c + 1]) / 2
         g = 9.8
         f = (
             wl
             # + (self.beta() * self.u(t, c, wl) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
             # / (2 * g)
-            + self.beta()
-            * (self._u(t, c, wl) ** 2 - self._u_array[c + 1] ** 2)
-            / (2 * g)
+            + self.beta() * (self._u(c, wl) ** 2 - self._u_array[c + 1] ** 2) / (2 * g)
             - self.wl[c + 1]
             - sf * dc
         )
@@ -220,14 +215,17 @@ class QuasiSteadyModel(HydroDynamicModel):
         # get the most downstream water level
         self.wl[-1] = self.get_ds_wl(t)
 
+        # current flow
+        self._flow_array = self._cfg._processed_inflow.get_flows(t)
+
         # use wl[i+1] to calculate wl[i]
         for i in range(len(self.cs) - 2, -1, -1):
-            self._Sf_array[i + 1] = self._Sf(t, i + 1)
-            self._u_array[i + 1] = self._u(t, i + 1)
+            self._Sf_array[i + 1] = self._Sf(i + 1)
+            self._u_array[i + 1] = self._u(i + 1)
 
             @lru_cache(maxsize=1000)
             def f(wl):
-                return self.conservation_of_energy(t, i, wl)
+                return self.conservation_of_energy(i, wl)
 
             init_wl = (
                 self.wl[i + 1]
@@ -247,8 +245,8 @@ class QuasiSteadyModel(HydroDynamicModel):
                     0.0001,
                 )
                 f = np.array([f(wl) for wl in wls])
-                Sfs = np.array([self._Sf(t, i, wl) for wl in wls])
-                us = np.array([self._u(t, i, wl) for wl in wls])
+                Sfs = np.array([self._Sf(i, wl) for wl in wls])
+                us = np.array([self._u(i, wl) for wl in wls])
                 df = pd.DataFrame({"wl": wls, "f": f, "Sf": Sfs, "u": us})
                 df = df[(-1 < df.f) & (df.f < 1)]
                 df.to_csv("root_finding_failure_f_values.csv", index=False)
@@ -260,8 +258,8 @@ class QuasiSteadyModel(HydroDynamicModel):
                 ) from exp
 
             self.wl[i] = wl
-            self._Sf_array[i] = self._Sf(t, i)
-            self._u_array[i] = self._u(t, i)
+            self._Sf_array[i] = self._Sf(i)
+            self._u_array[i] = self._u(i)
 
 
 class DynamicWaveModel(HydroDynamicModel):
