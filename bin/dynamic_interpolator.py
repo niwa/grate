@@ -27,14 +27,13 @@ class DynamicInterpolatorOld:
             y = self.f(x)
             new_points = self._refine(x, y, xmin, self.tab[0, 1])
             self.tab = np.vstack((new_points, self.tab[1:]))
-            # print(f"Got {x=}, so now tab is {self.tab=}")
             return y
 
         if x > xmax:
             y = self.f(x)
             new_points = self._refine(xmax, self.tab[-1, 1], x, y)
             self.tab = np.vstack((self.tab[:-1], new_points))
-            # print(f"Got {x=}, so now tab is {self.tab=}")
+            print(f"{x} > {xmax} so increasing tab to {xmin} to {self.tab[-1, 0]}")
             return y
 
         return np.interp(
@@ -76,7 +75,7 @@ class DynamicInterpolatorOld:
 class DynamicInterpolator:
     """Dynamically extend an interpolation range as required."""
 
-    def __init__(self, f, xmin, n=20):
+    def __init__(self, f, xmin, n=100):
         self.f = f
         self.xmin = xmin
         self.n = n
@@ -84,7 +83,7 @@ class DynamicInterpolator:
 
     def eval(self, x):
         if x <= self.xmin:
-            # can have water level elevation below left/right elevation
+            # can have water level elevation below elevation
             return 0
 
         if self.tab.shape[0] == 0:
@@ -96,10 +95,7 @@ class DynamicInterpolator:
             xmax = self.tab[-1, 0]
 
             if x < xmin:
-                new_xmin = max(
-                    self.xmin,
-                    xmin - (xmax - xmin),
-                )
+                new_xmin = max(self.xmin, x - (xmax - xmin))
                 self.tab = self._make_tab(new_xmin, xmax)
 
             elif x > xmax:

@@ -47,7 +47,7 @@ def try_to_num(val: str):
     return val
 
 
-def get_bracket_for_monotonic(f, x0, lower, maxits=50):
+def get_bracket_for_monotonic(f, x0, lower, max_growth: float | None = None, maxits=50):
     """Get bracket for monotonic f
 
     Parameters
@@ -60,6 +60,9 @@ def get_bracket_for_monotonic(f, x0, lower, maxits=50):
 
     lower: float
         Lower bound for domain
+
+    max_growth: float or None
+        If defined, don't search when x > lower + max_growth
 
     maxits: int
         Maximum number of doubling or halving from x0 to find bracket
@@ -87,7 +90,8 @@ def get_bracket_for_monotonic(f, x0, lower, maxits=50):
         return (x0,)
 
     # check if increasing or decreasing
-    x = x0 + 1
+    dx = 0.1 * (x0 - lower)
+    x = x0 + dx
     fx = f(x)
     if fx == fx0:
         raise ValueError(f"Cannot determine f' at x0={x0} because f is flat")
@@ -95,10 +99,24 @@ def get_bracket_for_monotonic(f, x0, lower, maxits=50):
     # go left if f(x0) positive and increasing, or negative and decreasing
     increasing = fx > fx0
     search_left = (fx0 > 0) == increasing
-    x = x0
 
+    # possibly found a bracket already
+    # if (fx <= 0) if fx0 > 0 else (fx >= 0):
+    #     return (x, x0) if search_left else (x0, x)
+
+    # as a quick and dirty use the derivative and jump twice the distance
+    fprime = (fx - fx0) / dx
+    x = x0 - 2 * fx0 / fprime
+    if x > lower:
+        fx = f(x)
+        if (fx <= 0) if fx0 > 0 else (fx >= 0):
+            return (x, x0) if search_left else (x0, x)
+
+    x = x0
     for _ in range(maxits):
         x = (x + lower) / 2 if search_left else lower + 2 * (x - lower)
+        if max_growth and x > lower + max_growth:
+            return None
         fx = f(x)
         if (fx <= 0) if fx0 > 0 else (fx >= 0):
             return (x, x0) if search_left else (x0, x)
@@ -151,7 +169,8 @@ def get_bracket(f, x0, lower, steps=100, mult=10):
     x_prev, f_prev = x0, fx0
 
     # Search left, then right, using the same spacing
-    for x in np.linspace(x0 - dx, lower + np.finfo(float).eps, steps):
+    for x in np.linspace(x0 - dx, lower + dx, steps):
+        # print(f"{lower=} {x=} {f(x)=}")
         fx = f(x)
         if fx == 0:
             return (x,)
@@ -161,6 +180,7 @@ def get_bracket(f, x0, lower, steps=100, mult=10):
 
     x_prev, f_prev = x0, fx0
     for x in np.linspace(x0 + dx, mult * x0, steps * mult):
+        # print(f"{lower=} {x=} {f(x)=}")
         fx = f(x)
         if fx == 0:
             return (x,)
@@ -171,7 +191,7 @@ def get_bracket(f, x0, lower, steps=100, mult=10):
     return None
 
 
-def find_root(f, x0, lower: float):
+def find_root(f, x0, lower: float, max_growth: float | None = None):
     """Finds root of f, where f is only defined for x > lower
 
     Parameters
@@ -184,10 +204,13 @@ def find_root(f, x0, lower: float):
 
     lower: float
         Lower bound for domain
+
+    max_growth: float or None
+        If defined, don't search when x > lower + max_growth
     """
 
     # try to get a bracket
-    b = get_bracket_for_monotonic(f, x0, lower)
+    b = get_bracket_for_monotonic(f, x0, lower, max_growth)
 
     # if f isn't monotonic or something else gone wrong, try uniform grid
     if b is None:
@@ -195,6 +218,7 @@ def find_root(f, x0, lower: float):
         b = get_bracket(f, x0, lower)
         if b is None:
             raise ValueError(f"Cannot find bracket for root finding at {x0}")
+        sys.stderr.write("Got a bracket using the exhaustive approach\n")
 
     # f(x0) == 0
     if len(b) == 1:

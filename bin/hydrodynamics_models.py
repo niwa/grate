@@ -233,9 +233,14 @@ class QuasiSteadyModel(HydroDynamicModel):
                 + self._channel.get_min_bed_level(i)
             )
 
+            # print(f"{t=} {i=} {init_wl=}")
+
             try:
                 wl = utils.find_root(
-                    f, x0=init_wl, lower=self._channel.get_min_bed_level(i)
+                    f,
+                    x0=init_wl,
+                    lower=self._channel.get_min_bed_level(i),
+                    max_growth=100.0,
                 )
 
             except Exception as exp:
@@ -260,6 +265,8 @@ class QuasiSteadyModel(HydroDynamicModel):
             self.wl[i] = wl
             self._Sf_array[i] = self._Sf(i)
             self._u_array[i] = self._u(i)
+
+            # print(f"Finished {t=} {i=} {wl=}")
 
 
 class DynamicWaveModel(HydroDynamicModel):

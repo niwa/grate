@@ -198,7 +198,13 @@ class LayerStack:
         rgsizes = np.expand_dims(self.rgsizes, 1)  # (nbins, 1)
 
         Fs = self._sand_fraction
-        phirm = 0.021 + 0.015 * np.exp(-20 * Fs)
+        with np.errstate(over="raise"):
+            try:
+                phirm = 0.021 + 0.015 * np.exp(-20 * Fs)
+            except Exception as e:
+                print(f"couldnt do phirm\n{Fs=}\n{self._acfd=}\n{self.rgsizes=}\n{e}")
+                raise
+
         s = self.sediment_densities / WATER_DENSITY  # (nlith, )
         dsm = self._dsm
         tau_rm = phirm * (s - 1) * WATER_DENSITY * GRAVITY * dsm
@@ -245,8 +251,13 @@ class LayerStack:
         else:
             return self._scfd
 
+    # FIXME
+    def get_acfd(self):
+        return self._acfd
+
     def add_to_acfd(self, df):
         self._acfd += df
+        print(self._acfd.sum())
         self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
         self._dsm = self._grain_size_percentile(0.5)
         self._d90 = self._grain_size_percentile(0.9)

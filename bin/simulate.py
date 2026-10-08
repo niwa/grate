@@ -42,6 +42,8 @@ def run_model(infile: pathlib.Path):
         cfg.model.channel_type
     ](cfg)
 
+    chan.display_acfd()
+
     print("done\nCreating hydromodel...", end="", flush=True)
     hmodel = {
         "quasi_ss": QuasiSteadyModel,
@@ -66,7 +68,8 @@ def run_model(infile: pathlib.Path):
             if do_sediment_transport:
                 chan.propogate_sediment(t, hmodel)
         except Exception:
-            out.write_step(t)
+            # out.write_step(t)
+            # FIXME
             sys.stderr.write("Error occured, final state written to output file")
             raise
 

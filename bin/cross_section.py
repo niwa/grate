@@ -426,14 +426,6 @@ class CrossSection:
         if interp is None:
             return 0.0
 
-        # if channel, then the interpolator takes depth
-        # print(f"{wl=} {self.min_bed_level=} {loc=}")
-        # if len(self.left):
-        #     print(f"{self.left[:, 1].min()=}")
-        # if len(self.channel):
-        #     print(f"{self.channel[:, 1].min()=}")
-        # if len(self.right):
-        #     print(f"{self.right[:, 1].min()=}")
         return interp.eval(wl - self.min_bed_level if loc is Loc.CHANNEL else wl)
 
     def _area(self, wl: float, loc: Loc):
@@ -501,6 +493,9 @@ class CrossSection:
             lith group and j proportion size
         """
         return self.layers.qb_jli(hydro) * self.Bwet(hydro.wl[self.chainidx])
+
+    def get_acfd(self):
+        return self.layers.get_acfd()
 
     def update_alayer_proportions(self, df: np.ndarray):
         self.layers.add_to_acfd(df)

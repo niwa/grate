@@ -167,9 +167,14 @@ class Channel:
     def conveyance(self, c: int, wl: float):
         return self.xss[c].conveyance(wl)
 
+    # FIXME, do we need this?
     def R(self, c: int, wl: float):
         """Hydraulic radius A/P over entire xsection"""
         return self.xss[c].R(wl)
+
+    def display_acfd(self):
+        for xs in self.xss:
+            print(xs.get_acfd())
 
 
 class River(Channel):
