@@ -42,8 +42,6 @@ def run_model(infile: pathlib.Path):
         cfg.model.channel_type
     ](cfg)
 
-    chan.display_acfd()
-
     print("done\nCreating hydromodel...", end="", flush=True)
     hmodel = {
         "quasi_ss": QuasiSteadyModel,

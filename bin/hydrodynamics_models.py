@@ -117,11 +117,11 @@ class HydroDynamicModel:
             wl = self.wl[c]
         return self._channel.Bwet(c, wl)
 
-    def R(self, c: int, wl: float | None = None):
-        """Hydraulic radius A/P over entire xsection"""
-        if wl is None:
-            wl = self.wl[c]
-        return self._channel.R(c, wl)
+    # def R(self, c: int, wl: float | None = None):
+    #     """Hydraulic radius A/P over entire xsection"""
+    #     if wl is None:
+    #         wl = self.wl[c]
+    #     return self._channel.R(c, wl)
 
     def update_water_level(self):
         raise NotImplementedError()

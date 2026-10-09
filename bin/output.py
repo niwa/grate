@@ -63,9 +63,7 @@ class Output:
         )
 
     def _get_grain_stress(self):
-        return np.array(
-            [self._chan.grain_stress(c, self.time, self._hmodel) for c in self._cidx]
-        )
+        return np.array([self._chan.grain_stress(c, self._hmodel) for c in self._cidx])
 
     def get_grain_stress(self):
         return xr.DataArray(

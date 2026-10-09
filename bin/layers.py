@@ -257,7 +257,12 @@ class LayerStack:
 
     def add_to_acfd(self, df):
         self._acfd += df
-        print(self._acfd.sum())
+
+        # FIXME
+        row_sums = self._acfd.sum(axis=1)
+        if not np.all((row_sums >= 0) & (row_sums <= 1)):
+            print(self._acfd)
+
         self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
         self._dsm = self._grain_size_percentile(0.5)
         self._d90 = self._grain_size_percentile(0.9)

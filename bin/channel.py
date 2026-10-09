@@ -122,7 +122,7 @@ class Channel:
         """Water surface width"""
         return self.xss[c].Bwet(wl)
 
-    def grain_stress(self, c: int, t: pd.Timestamp, hydro):
+    def grain_stress(self, c: int, hydro):
         return self.xss[c].grain_stress(hydro)
 
     def get_Qb_jli(self, c: int, hydro):
@@ -168,13 +168,9 @@ class Channel:
         return self.xss[c].conveyance(wl)
 
     # FIXME, do we need this?
-    def R(self, c: int, wl: float):
-        """Hydraulic radius A/P over entire xsection"""
-        return self.xss[c].R(wl)
-
-    def display_acfd(self):
-        for xs in self.xss:
-            print(xs.get_acfd())
+    # def R(self, c: int, wl: float):
+    #     """Hydraulic radius A/P over entire xsection"""
+    #     return self.xss[c].R(wl)
 
 
 class River(Channel):
