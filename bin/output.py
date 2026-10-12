@@ -7,13 +7,15 @@ from channel import Channel
 from hydrodynamics_models import HydroDynamicModel
 from grainprofile import get_representative_grain_sizes
 
+WATER_DENSITY = 1000
+
 
 class Output:
     """Output directly to a single NetCDF file using h5py."""
 
     def __init__(self, cfg: GrateConfig, hmodel: HydroDynamicModel, chan: Channel):
         self._hmodel = hmodel
-        self._cs = chan.cs
+        self._cs = chan._cs
         self._cidx = list(range(len(self._cs)))
         self._chan = chan
         self._rgsizes = get_representative_grain_sizes(
@@ -41,7 +43,7 @@ class Output:
         self._epoch = None
 
     def _get_water_level(self):
-        return self._hmodel.wl.copy()
+        return self._hmodel.get_wl().copy()
 
     def get_water_level(self):
         return xr.DataArray(
@@ -52,7 +54,7 @@ class Output:
         )
 
     def _get_velocity(self):
-        return np.array([self._hmodel.get_u(c) for c in self._cidx])
+        return self._hmodel.get_vel().copy()
 
     def get_velocity(self):
         return xr.DataArray(
@@ -63,7 +65,8 @@ class Output:
         )
 
     def _get_grain_stress(self):
-        return np.array([self._chan.grain_stress(c, self._hmodel) for c in self._cidx])
+        r = self._chan.get_grain_shear_velocity()
+        return WATER_DENSITY * r**2
 
     def get_grain_stress(self):
         return xr.DataArray(
@@ -74,9 +77,7 @@ class Output:
         )
 
     def _get_total_transport_rate(self):
-        return np.array(
-            [self._chan.get_Qb_jli(c, self._hmodel).sum() for c in self._cidx]
-        )
+        return np.array([self._chan.get_Qb_jli()[c].sum() for c in self._cidx])
 
     def get_total_transport_rate(self):
         return xr.DataArray(
@@ -87,7 +88,7 @@ class Output:
         )
 
     def _get_transport_rate(self):
-        return np.array([self._chan.get_Qb_jli(c, self._hmodel) for c in self._cidx])
+        return np.array([self._chan.get_Qb_jli()[c] for c in self._cidx])
 
     def get_transport_rate(self):
         return xr.DataArray(

@@ -10,21 +10,27 @@ from channel import Channel, Loc
 
 class HydroDynamicModel:
     def __init__(self, cfg: GrateConfig, chan: Channel):
+        """
+        A design choice is that all the getters on this class should return
+        info from stored arrays, not go get the info from elsewhere.
+
+        Functions that start with _calc actually calculate values
+        """
+
         self._cfg = cfg
         self._channel = chan
-        self.cs = self._channel._chainpts()
-        self.initialize(self._cfg.simulation_time.start)
-
-        # cache these variables for current tempstep
-        self._Sf_array = np.empty(len(self.cs))
-        self._u_array = np.empty(len(self.cs))
-        self._flow_array = np.empty(len(self.cs))
+        self._cs = self._channel._chainpts()
 
         # make sure the inflow boundary conditions know about (potentially) new chainage
-        cfg._processed_inflow.rechainage(self.cs)
+        cfg._processed_inflow.rechainage(self._cs)
 
-        # store bed slope in here each iteration
-        # self.S0_array = []
+        # store these variables for current timestep
+        self._Sf = np.empty(len(self._cs))
+        self._vel = np.empty(len(self._cs))
+        self._flow = np.empty(len(self._cs))
+        self._wl = np.empty(len(self._cs))
+
+        self.initialize(self._cfg.simulation_time.start)
 
     def initialize(self, t: pd.Timestamp):
         """Set water level (elevation above same datum cross-section profile y
@@ -37,85 +43,92 @@ class HydroDynamicModel:
         if "normal" in tv:
             v = tv["normal"]["wl_init"]
         else:
-            v = self.get_ds_wl(t)
+            v = self._calc_ds_wl(t)
 
-        self.wl = np.full(len(self.cs), v, dtype=float)
+        # initialize water level to downstream value shifted by bed
+        self._wl[-1] = v
+        for c in range(len(self._cs) - 2, -1, -1):
+            self._wl[c] = (
+                self._wl[c + 1]
+                - self._channel.get_min_bed_level()[c + 1]
+                + self._channel.get_min_bed_level()[c]
+            )
 
-        # get starting flow
-        self._flow_array = self._cfg._processed_inflow.get_flows(t)
+        # starting flow
+        self._flow = self._cfg._processed_inflow.get_flows(t)
 
-    def beta(self):
+        # set cross-section/layer caches except for gsv which we must miss
+        # since not sensible hydraulics yet
+        self._channel.set_layer_arrays(self, do_gsv=False)
+
+        # run the first step, this gets our Sf and vel set which allows
+        # channel to initialize its variables
+        self.update_water_level(t)
+        self._channel.set_layer_arrays(self)
+
+    def get_beta(self):
         """Momentum correction factor"""
         return self._cfg.morphological.beta
 
-    def A(self, c: int, wl: float | None = None):
-        """The area of the water at c chainage
+    def get_vel(self):
+        """Previously calculated u or velocity"""
+        return self._vel
 
-        Parameters
-        ----------
-        c: int
-            Chainage point along river in units of dc
-
-        wl: float
-            If None, then get the water level from self.wl, else calculate for this
-            water level
-
-        loc: Loc
-            If None, get the total area, otherwise just in this Loc (left, main
-            channel, or right bank0
-        """
-        if wl is None:
-            wl = self.wl[c]
-        return self._channel.area(c, wl, Loc.ALL)
-
-    def get_u(self, c: int):
-        """Previously calculated u"""
-        return self._u_array[c]
-
-    def get_flow(self, c: int):
+    def get_flow(self):
         """Previously calculated flow"""
-        return self._flow_array[c]
+        return self._flow
 
-    def _u(self, c: int, wl: float | None = None):
-        """The mean velocity, ie Q/A at current step"""
-        if wl is None:
-            wl = self.wl[c]
-        return self._flow_array[c] / self.A(c, wl)
-
-    def conveyance(self, c: int, wl: float | None = None):
-        """K conveyance
-
-        sum over left, main, right of
-            A * R^(2/3) / (ng + nf)
-
-        where
-            A is the area
-            R is A/P
-            ng is grain roughness
-            nf is form roughness
-        """
-        if wl is None:
-            wl = self.wl[c]
-        return self._channel.conveyance(c, wl)
-
-    def get_Sf(self, c: int):
+    def get_Sf(self):
         """Previously calculated Sf"""
-        return self._Sf_array[c]
+        return self._Sf
 
-    def _Sf(self, c: int, wl: float | None = None):
-        """Return friction slope, ie. Q abs(Q) / K^2"""
-        Q = self._flow_array[c]
-        return Q * abs(Q) / self.conveyance(c, wl) ** 2
+    def get_wl(self):
+        return self._wl
+
+    # def A(self, c: int, wl: float | None = None):
+    #     """The area of the water at c chainage
+    #
+    #     Parameters
+    #     ----------
+    #     c: int
+    #         Chainage point along river in units of dc
+    #
+    #     wl: float
+    #         If None, then get the water level from self.wl, else calculate for this
+    #         water level
+    #
+    #     loc: Loc
+    #         If None, get the total area, otherwise just in this Loc (left, main
+    #         channel, or right bank0
+    #     """
+    #     if wl is None:
+    #         wl = self.wl[c]
+    #     return self._channel.area(c, wl, Loc.ALL)
+
+    # def conveyance(self, c: int, wl: float):
+    #     """K conveyance
+    #
+    #     sum over left, main, right of
+    #         A * R^(2/3) / (ng + nf)
+    #
+    #     where
+    #         A is the area
+    #         R is A/P
+    #         ng is grain roughness
+    #         nf is form roughness
+    #     """
+    #     return self._channel.conveyance(c, wl)
 
     # def _S0(self, c: int):
     #     """Bed slope at c"""
     #     return self._channel.S0(c)
 
-    def Bwet(self, c: int, wl: float | None = None):
-        """Water surface width"""
-        if wl is None:
-            wl = self.wl[c]
-        return self._channel.Bwet(c, wl)
+    # # FIXME, probably shouldn't have this here
+    # def Bwet(self, c: int, wl: float | None = None):
+    #     """Water surface width"""
+    #     if wl is None:
+    #         wl = self.wl[c]
+    #     return self._channel.Bwet(c, wl)
 
     # def R(self, c: int, wl: float | None = None):
     #     """Hydraulic radius A/P over entire xsection"""
@@ -123,28 +136,34 @@ class HydroDynamicModel:
     #         wl = self.wl[c]
     #     return self._channel.R(c, wl)
 
-    def update_water_level(self):
-        raise NotImplementedError()
+    def _calc_vel(self, c: int, wl: float):
+        """The mean velocity, ie Q/A at current step"""
+        return self._flow[c] / self._channel.calc_area(c, wl, Loc.ALL)
 
-    def get_ds_wl(self, t: pd.Timestamp):
+    def _calc_Sf(self, c: int, wl: float):
+        """Return friction slope, ie. Q abs(Q) / K^2"""
+        Q = self._flow[c]
+        return Q * abs(Q) / self._channel.calc_conveyance(c, wl) ** 2
+
+    def _calc_ds_wl(self, t: pd.Timestamp):
         """Return downstream water level of water."""
-        lastchain = len(self.cs) - 1
+        lastchain = len(self._cs) - 1
         tv = self._cfg._processed_downstream_boundary.value_at(t)
         if "elevation" in tv:
             return tv["elevation"]
         if "depth" in tv:
-            return tv["depth"] + self._channel.get_min_bed_level(lastchain)
+            return tv["depth"] + self._channel.get_min_bed_level()[lastchain]
         if "normal" in tv:
             slope = tv["normal"]["slope"]
-            Q = self.Q(t, lastchain)
+            Q = self._flow[lastchain]
 
             def f(wl):
-                K = self.conveyance(lastchain, wl)
+                K = self._channel._calc_conveyance(lastchain, wl)
                 return Q - K * math.sqrt(slope)
 
             try:
                 wl = utils.find_root(
-                    f, self.wl[lastchain], self._channel.get_min_bed_level(lastchain)
+                    f, self._wl[lastchain], self._channel.get_min_bed_level()[lastchain]
                 )
             except Exception as exp:
                 raise RuntimeError("get_ds_wl failed to find root") from exp
@@ -153,25 +172,11 @@ class HydroDynamicModel:
 
         raise ValueError(f"Unknown downstream boundary type: {tv['type']}")
 
+    def update_water_level(self):
+        raise NotImplementedError()
+
 
 class QuasiSteadyModel(HydroDynamicModel):
-    # @lru_cache(maxsize=4000)
-    # def Q(self, t: pd.Timestamp, c: int):
-    #     """Return flow at point along river
-    #
-    #     Parameters
-    #     ----------
-    #     c: int
-    #         Chainage point along river in dc units
-    #
-    #     t: pd.Timestamp
-    #         Time
-    #     """
-    #     c = self.cs[c]  # convert index to chainage
-    #     return sum(
-    #         pi.value_at(t) for pi in self._cfg._processed_inflow if pi.ordinate <= c
-    #     )
-
     def conservation_of_energy(self, c: int, wl: float):
         """Calculate equation 5.7, the change in energy between me and
         downstream
@@ -190,18 +195,17 @@ class QuasiSteadyModel(HydroDynamicModel):
         We should have already sorted at c+1
         """
 
-        dc = self.cs[c + 1] - self.cs[c]
-        sf = (self._Sf(c, wl) + self._Sf_array[c + 1]) / 2
+        dc = self._cs[c + 1] - self._cs[c]
+        sf = (self._calc_Sf(c, wl) + self._Sf[c + 1]) / 2
         g = 9.8
-        f = (
+        return (
             wl
-            # + (self.beta() * self.u(t, c, wl) ** 2 - self.beta() * self.u(t, c + 1) ** 2)
-            # / (2 * g)
-            + self.beta() * (self._u(c, wl) ** 2 - self._u_array[c + 1] ** 2) / (2 * g)
-            - self.wl[c + 1]
+            + self.get_beta()
+            * (self._calc_vel(c, wl) ** 2 - self._vel[c + 1] ** 2)
+            / (2 * g)
+            - self._wl[c + 1]
             - sf * dc
         )
-        return f
 
     def update_water_level(self, t: pd.Timestamp):
         """
@@ -213,60 +217,60 @@ class QuasiSteadyModel(HydroDynamicModel):
         """
 
         # get the most downstream water level
-        self.wl[-1] = self.get_ds_wl(t)
+        self._wl[-1] = self._calc_ds_wl(t)
 
         # current flow
-        self._flow_array = self._cfg._processed_inflow.get_flows(t)
+        self._flow = self._cfg._processed_inflow.get_flows(t)
 
         # use wl[i+1] to calculate wl[i]
-        for i in range(len(self.cs) - 2, -1, -1):
-            self._Sf_array[i + 1] = self._Sf(i + 1)
-            self._u_array[i + 1] = self._u(i + 1)
+        for i in range(len(self._cs) - 2, -1, -1):
+            self._Sf[i + 1] = self._calc_Sf(i + 1, self._wl[i + 1])
+            self._vel[i + 1] = self._calc_vel(i + 1, self._wl[i + 1])
 
             @lru_cache(maxsize=1000)
             def f(wl):
                 return self.conservation_of_energy(i, wl)
 
             init_wl = (
-                self.wl[i + 1]
-                - self._channel.get_min_bed_level(i + 1)
-                + self._channel.get_min_bed_level(i)
+                self._wl[i + 1]
+                - self._channel.get_min_bed_level()[i + 1]
+                + self._channel.get_min_bed_level()[i]
             )
-
-            # print(f"{t=} {i=} {init_wl=}")
 
             try:
                 wl = utils.find_root(
                     f,
                     x0=init_wl,
-                    lower=self._channel.get_min_bed_level(i),
+                    lower=self._channel.get_min_bed_level()[i],
                     max_growth=100.0,
                 )
 
             except Exception as exp:
                 wls = np.arange(
-                    self._channel.get_min_bed_level(i) + 0.0001,
-                    self._channel.get_min_bed_level(i) + 10.0,
+                    self._channel.get_min_bed_level()[i] + 0.0001,
+                    self._channel.get_min_bed_level()[i] + 10.0,
                     0.0001,
                 )
                 f = np.array([f(wl) for wl in wls])
-                Sfs = np.array([self._Sf(i, wl) for wl in wls])
-                us = np.array([self._u(i, wl) for wl in wls])
+                Sfs = np.array([self._calc_Sf(i, wl) for wl in wls])
+                us = np.array([self._calc_vel(i, wl) for wl in wls])
                 df = pd.DataFrame({"wl": wls, "f": f, "Sf": Sfs, "u": us})
                 df = df[(-1 < df.f) & (df.f < 1)]
                 df.to_csv("root_finding_failure_f_values.csv", index=False)
-                self._channel.xss[i].df.to_csv("failured_profile.csv", index=False)
-                print(f"Sf array = {self._Sf_array}")
-                print(f"u array = {self._u_array}")
+                self._channel._xss[i].df.to_csv("failured_profile.csv", index=False)
                 raise RuntimeError(
-                    f"find_root failed at cross-section {i} chainage={self.cs[i]}, f saved in root_finding_failure_f_values.csv"
+                    f"find_root failed at cross-section {i} chainage={self._cs[i]}, f saved in root_finding_failure_f_values.csv"
                 ) from exp
 
-            self.wl[i] = wl
-            self._Sf_array[i] = self._Sf(i)
-            self._u_array[i] = self._u(i)
+            self._wl[i] = wl
+            self._Sf[i] = self._calc_Sf(i, wl)
+            self._vel[i] = self._calc_vel(i, wl)
 
             # print(f"Finished {t=} {i=} {wl=}")
+
+        # tell channel that wl is fixed for this iteration so it an store its
+        # variables that depend on wl
+        self._channel.set_profile_arrays(self._wl)
 
 
 class DynamicWaveModel(HydroDynamicModel):

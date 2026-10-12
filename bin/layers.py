@@ -45,14 +45,6 @@ class LayerStack:
         else:
             self._scfd = "Interp"
 
-    def __str__(self):
-        return f"Layer {self.chainage=} {self.chainidx=}"
-
-    def _set_grain_props(self):
-        self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
-        self._d90 = self._grain_size_percentile(0.9)
-        self._dsm = self._grain_size_percentile(0.5)
-
     def interpolate(self, other: "LayerStack", f: float, chainidx: int) -> "LayerStack":
         """Return a new layer stack that is interped between me and other"""
 
@@ -74,13 +66,28 @@ class LayerStack:
         result.sediment_densities = self.sediment_densities
 
         # recalculate sand_fraction, dsm and d90, not interpolate
-        result._sand_fraction = result._grain_proportion_smaller_than(SAND_SIZE)
-        result._d90 = result._grain_size_percentile(0.9)
-        result._dsm = result._grain_size_percentile(0.5)
+        # result._sand_fraction = result._grain_proportion_smaller_than(SAND_SIZE)
+        # result._d90 = result._grain_size_percentile(0.9)
+        # result._dsm = result._grain_size_percentile(0.5)
 
         return result
 
-    def grain_shear_velocity(self, hydro):
+    # def _set_grain_props(self):
+    #     self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
+    #     self._d90 = self._grain_size_percentile(0.9)
+    #     self._dsm = self._grain_size_percentile(0.5)
+
+    def calc_sand_fraction(self):
+        return self.__grain_proportion_smaller_than(SAND_SIZE)
+
+    def calc_dsm(self):
+        return self.__grain_size_percentile(0.5)
+
+    def calc_d90(self):
+        """90th percentile of grain sizes in active layer channel."""
+        return self.__grain_size_percentile(0.9)
+
+    def calc_gsv(self, Sf: float, velocity: float, d90: float):
         """Return grain shear velocity, u^*
 
         From equation 10.3
@@ -108,33 +115,46 @@ class LayerStack:
         This can be solved `analytically`, the solution is
             x = a / 2 / W(a sqrt(b) / 2)
         where W is the lambertw
+
+        Parameters
+        ----------
+        Sf: float
+            Friction slope.  This comes from the hydrodynamics model, it has
+            been cached
+
+        velocity: float
+            Velocity of water, hydrodynamics model has it
+
+        d90: float
+            90th percentile of grain sizes in active layer in CHANNEL.  Comes from
+            self.calc_d90, but channel class has it cached and can pass it in
+            here
+
         """
 
-        Sf = hydro.get_Sf(self.chainidx)
-        ks = 2 * self._d90
+        # Sf = hydro.get_Sf()[self.chainidx]
+        # ks = 2 * self._d90
+        ks = 2 * d90
 
-        a = KAPPA * hydro.get_u(self.chainidx)
+        # a = KAPPA * hydro.get_vel()[self.chainidx]
+        a = KAPPA * velocity
         b = 11 / GRAVITY / Sf / ks
 
         x = a * np.sqrt(b) / 2
         assert x > 0, "ustar calc, arg to lambertw <= 0, possibly complex solutions"
         return (a / 2 / scipy.special.lambertw(x)).real
 
-    def grain_stress(self, hydro):
-        """Grain stress tau_g
+    # def grain_stress(self, hydro):
+    #     """Grain stress tau_g
+    #
+    #     From equation 10.5
+    #
+    #     rho grain_shear_velocity^2
+    #     """
+    #     ustar = self.grain_shear_velocity(hydro)
+    #     return WATER_DENSITY * ustar**2
 
-        From equation 10.5
-
-        rho grain_shear_velocity^2
-        """
-        ustar = self.grain_shear_velocity(hydro)
-        return WATER_DENSITY * ustar**2
-
-    def get_d90(self):
-        """90th percentile of grain sizes in active layer."""
-        return self._d90
-
-    def _grain_size_percentile(self, x: float):
+    def __grain_size_percentile(self, x: float):
         """Grain size in active layer over all lith at this percentile
 
         Parameters
@@ -159,7 +179,7 @@ class LayerStack:
 
         return np.exp(-phi)
 
-    def _grain_proportion_smaller_than(self, x: float):
+    def __grain_proportion_smaller_than(self, x: float):
         """Proportion of grains (over all lith) smaller than given size
 
         Parameters
@@ -183,10 +203,24 @@ class LayerStack:
         # we must reverse since np.interp expects x-coord to increase
         return np.interp(-np.log(x), -np.log(self.rgsizes)[::-1], cf[::-1])
 
-    def qb_jli(self, hydro):
+    def qb_jli(self, gsv: float, sand_fraction: float, dsm: float):
         """Volumetric transport rate per unit width
 
         Wilcock & Crowe (2003), equation 9.33, qb_jc
+
+        Parameters
+        ----------
+        gsv: float
+            grain shear velocity.  self.calc_gsv, but this has been cached by channel
+            and passed in
+
+        sand_fraction: float
+            self.calc_sand_fraction, but this has been cached by channel
+            and passed in
+
+        dsm: float
+            self.calc_dsm, but this has been cached by channel
+            and passed in
 
         Returns
         -------
@@ -197,7 +231,8 @@ class LayerStack:
 
         rgsizes = np.expand_dims(self.rgsizes, 1)  # (nbins, 1)
 
-        Fs = self._sand_fraction
+        # Fs = self._sand_fraction
+        Fs = sand_fraction
         with np.errstate(over="raise"):
             try:
                 phirm = 0.021 + 0.015 * np.exp(-20 * Fs)
@@ -206,13 +241,17 @@ class LayerStack:
                 raise
 
         s = self.sediment_densities / WATER_DENSITY  # (nlith, )
-        dsm = self._dsm
+        # dsm = self._dsm
         tau_rm = phirm * (s - 1) * WATER_DENSITY * GRAVITY * dsm
         b = 0.67 / (1 + np.exp(1.5 - rgsizes / dsm))  # (nbins, 1 )
         tau_rj = tau_rm * (rgsizes / dsm) ** b  # (nbins, nlith)
-        phi = self.grain_stress(hydro) / tau_rj  # (nbins, nlith)
         Fj = self._acfd  # (nbins, nlith)
-        ustar = self.grain_shear_velocity(hydro)
+
+        # phi = self.grain_stress(hydro) / tau_rj  # (nbins, nlith)
+        phi = (WATER_DENSITY * gsv**2) / tau_rj  # (nbins, nlith)
+
+        # ustar = self.grain_shear_velocity(hydro)
+        ustar = gsv
 
         q = Fj * ustar**3 / (s - 1) / GRAVITY  # (nbins, nlith)
 
@@ -251,9 +290,9 @@ class LayerStack:
         else:
             return self._scfd
 
-    # FIXME
-    def get_acfd(self):
-        return self._acfd
+    # # FIXME
+    # def get_acfd(self):
+    #     return self._acfd
 
     def add_to_acfd(self, df):
         self._acfd += df
@@ -263,6 +302,6 @@ class LayerStack:
         if not np.all((row_sums >= 0) & (row_sums <= 1)):
             print(self._acfd)
 
-        self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
-        self._dsm = self._grain_size_percentile(0.5)
-        self._d90 = self._grain_size_percentile(0.9)
+        # self._sand_fraction = self._grain_proportion_smaller_than(SAND_SIZE)
+        # self._dsm = self._grain_size_percentile(0.5)
+        # self._d90 = self._grain_size_percentile(0.9)

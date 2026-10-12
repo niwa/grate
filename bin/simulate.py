@@ -47,8 +47,11 @@ def run_model(infile: pathlib.Path):
         "quasi_ss": QuasiSteadyModel,
         "dynamic": DynamicWaveModel,
     }[cfg.model.hydro_model_type](cfg, chan)
-
     print("done", flush=True)
+
+    # ask channel to initialize its cached variables
+    # chan.set_layer_arrays(hmodel)
+
     out = Output(cfg, hmodel, chan)
 
     do_sediment_transport = True
@@ -64,6 +67,8 @@ def run_model(infile: pathlib.Path):
         try:
             hmodel.update_water_level(t)
             if do_sediment_transport:
+                # FIXME, it would be best to figure out dy and df transport rates, then
+                # output, then update Qb_jli
                 chan.propogate_sediment(t, hmodel)
         except Exception:
             # out.write_step(t)
@@ -93,6 +98,7 @@ def run_model(infile: pathlib.Path):
             #     flush=True,
             # )
 
+        # FIXME, this is output at t+dt since we have already updated stuff.
         if step % cfg.output.frequency == 0:
             out.write_step(t)
 
@@ -101,7 +107,7 @@ def run_model(infile: pathlib.Path):
         t += dt
 
         # if above qthres increase dt and don't do sediment transport
-        if hmodel.get_flow(len(hmodel.cs) - 1) < cfg.morphological.qthres:
+        if hmodel.get_flow()[-1] < cfg.morphological.qthres:
             dt = pd.Timedelta(
                 seconds=cfg.simulation_time.max_dt_qs
                 * cfg.morphological.qthres_dtmultiplier

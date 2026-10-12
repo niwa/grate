@@ -131,11 +131,6 @@ class CrossSection:
             else None,
         }
 
-    def __str__(self):
-        return (
-            f"CrossSection at chainage={self.chainage} (idx={self.chainidx})\n{self.df}"
-        )
-
     @classmethod
     def resolve_interpolated_properties(cls, xss: dict):
         """Resolve properties marked 'Interp' using neighbouring cross sections."""
@@ -191,7 +186,7 @@ class CrossSection:
 
         for xs in xss.values():
             xs._set_points(xs.df)
-            xs.layers._set_grain_props()
+            # xs.layers._set_grain_props()
 
     def _set_points(self, df):
         """Set profile points and calculate derived properties."""
@@ -208,8 +203,8 @@ class CrossSection:
             self.df
         )
 
-        self.mean_bed_level = self._calculate_mean_bed_level()
-        self.min_bed_level = self._calculate_min_bed_level()
+        self.mean_bed_level = self.calc_mean_bed_level()
+        self.min_bed_level = self.calc_min_bed_level()
 
         self.__setup_interpolators()
 
@@ -270,11 +265,16 @@ class CrossSection:
         cs.layers = source.layers.interpolate(other.layers, f, chainidx)
         return cs
 
-    def d90(self, loc: Loc):
-        if loc == Loc.CHANNEL or self.bankd90 is None:
-            return self.layers.get_d90()
-        else:
-            return self.bankd90
+    def calc_d90(self):
+        """d90 as np.array([left, channel, right])"""
+        ch = self.layers.calc_d90()
+        if self.bankd90 is None:
+            return np.array([ch, ch, ch])
+        return np.array([self.bankd90, ch, self.bankd90])
+
+    def calc_ng(self):
+        """Grain roughness as np.array([left, channel, right])"""
+        return 0.044 * self.calc_d90() ** (1 / 6)
 
     def f_interface(self, aggrading: bool, p: float):
         return self.layers.f_interface(aggrading, p)
@@ -322,7 +322,7 @@ class CrossSection:
 
         return data, left, channel, right
 
-    def _calculate_mean_bed_level(self):
+    def calc_mean_bed_level(self):
         """Return weighted mean of the bed elevations in channel"""
         x = self.channel[:, 0]
         y = self.channel[:, 1]
@@ -337,7 +337,7 @@ class CrossSection:
                 dx = (x[2:] - x[:-2]) / 2
                 return np.sum(dx * y[1:-1]) / np.sum(dx)
 
-    def _calculate_min_bed_level(self):
+    def calc_min_bed_level(self):
         """The minimum bed level."""
         return self.channel[:, 1].min()
 
@@ -347,8 +347,8 @@ class CrossSection:
         self.min_bed_level += dy
         self.mean_bed_level += dy
 
-    def grain_stress(self, hydro):
-        return self.layers.grain_stress(hydro)
+    # def grain_stress(self, hydro):
+    #     return self.layers.grain_stress(hydro)
 
     def _wetted_segments(self, wl: float, loc: Loc):
         """Yield roughness, perimeter, width and area for each wetted segment."""
@@ -402,7 +402,7 @@ class CrossSection:
         """Return channel width"""
         return self.channel[-1, 0] - self.channel[0, 0]
 
-    def Bwet(self, wl: float):
+    def calc_Bwet(self, wl: float):
         """Return water surface width for given water level."""
         ret = 0
         for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT):
@@ -417,10 +417,12 @@ class CrossSection:
         """Return water surface width for given water level."""
         return sum(w for _, _, w, _ in self._wetted_segments(wl, loc))
 
-    def area(self, wl: float, loc: Loc):
+    def calc_area(self, wl: float, loc: Loc):
         """Area of water below this water level and above min_bed_level."""
         if loc == Loc.ALL:
-            return sum(self.area(wl, loc) for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT))
+            return sum(
+                self.calc_area(wl, loc) for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT)
+            )
 
         interp = self._area_interpolator[loc]
         if interp is None:
@@ -431,7 +433,7 @@ class CrossSection:
     def _area(self, wl: float, loc: Loc):
         return sum(a for _, _, _, a in self._wetted_segments(wl, loc))
 
-    def _P(self, wl: float, loc: Loc):
+    def calc_P(self, wl: float, loc: Loc):
         """Wetted perimeter for given water level."""
 
         interp = self._P_interpolator[loc]
@@ -443,7 +445,7 @@ class CrossSection:
         """Wetted perimeter for given water level."""
         return sum(p for _, p, _, _ in self._wetted_segments(wl, loc))
 
-    def _nf(self, wl: float, loc: Loc):
+    def calc_nf(self, wl: float, loc: Loc):
         """Return form roughness for the wetted cross-section.
 
         formrf * sum_k (r_k * p_k) / P
@@ -478,21 +480,22 @@ class CrossSection:
         # don't need to multiply by formrf since roughness already done that
         return weighted_p / peri if peri != 0 else 0
 
-    def Qb_jli(self, hydro):
-        """Return bed material transport rate 2darray
-
-        Parameters
-        ----------
-        t: pd.Timestamp
-            Time
-
-        Returns
-        -------
-        np.array:
-            nbins x nlith 2d array.  (j, li) element is bed transport for li
-            lith group and j proportion size
-        """
-        return self.layers.qb_jli(hydro) * self.Bwet(hydro.wl[self.chainidx])
+    # def calc_Qb_jli(self, hydro):
+    #     """Return bed material transport rate 2darray
+    #
+    #     Parameters
+    #     ----------
+    #     t: pd.Timestamp
+    #         Time
+    #
+    #     Returns
+    #     -------
+    #     np.array:
+    #         nbins x nlith 2d array.  (j, li) element is bed transport for li
+    #         lith group and j proportion size
+    #     """
+    #     # FIXME, can we avoid passing hydro in
+    #     return self.layers.qb_jli(hydro) * self.calc_Bwet(hydro.get_wl()[self.chainidx])
 
     def get_acfd(self):
         return self.layers.get_acfd()
@@ -500,14 +503,15 @@ class CrossSection:
     def update_alayer_proportions(self, df: np.ndarray):
         self.layers.add_to_acfd(df)
         # the ng cache needs invalidating since acfd change means d90 changes
-        self.ng.cache_clear()
+        # self.ng.cache_clear()
 
-    @lru_cache(maxsize=10000)
-    def ng(self, loc: Loc):
-        """Grain roughness in left/channel/right"""
-        return 0.044 * self.d90(loc) ** (1 / 6)
+    # @lru_cache(maxsize=10000)
+    # def ng(self, loc: Loc):
+    #     # FIXME, should cache in channel
+    #     """Grain roughness in left/channel/right"""
+    #     return 0.044 * self.calc_d90(loc) ** (1 / 6)
 
-    def conveyance(self, wl: float):
+    def calc_conveyance_using_wl(self, wl: float, ng_array):
         """K conveyance
 
         sum over left, main, right of
@@ -519,14 +523,33 @@ class CrossSection:
             ng is grain roughness
             nf is form roughness
         """
-        return self._conveyance_cached(
-            wl,
-            (self.ng(Loc.LEFT), self.ng(Loc.CHANNEL), self.ng(Loc.RIGHT)),
-            self.min_bed_level,
-        )
+        return self._conveyance_cached(wl, tuple(ng_array.tolist()), self.min_bed_level)
+
+    def calc_conveyance(self, A: np.array, P: np.array, nf: np.array, ng: np.array):
+        """Calculate conveyance using known A, P, nf, ng
+
+        Parameters
+        ----------
+        A: np.array
+            area of left, channel and right
+
+        P: np.array
+            wetted periment of left, channel and right
+
+        nf: np.array
+            roughness of left, channel and right
+
+        ng: np.array
+            grain roughness of left, channel and right
+        """
+
+        mask = P != 0
+        K = np.sum(A[mask] * (A[mask] / P[mask]) ** (2 / 3) / (ng[mask] + nf[mask]))
+        assert K > 0, "No water"
+        return K
 
     @lru_cache(maxsize=10000)
-    def _conveyance_cached(self, wl: float, ngs: tuple, min_bed_level: float):
+    def _conveyance_cached(self, wl: float, ng_array: tuple, min_bed_level: float):
         """K conveyance
 
         sum over left, main, right of
@@ -542,14 +565,14 @@ class CrossSection:
         min_bed_level changing because acfd (and then d90) changes
         """
         K = 0
-        for loc, ng in zip((Loc.LEFT, Loc.CHANNEL, Loc.RIGHT), ngs):
-            A = self.area(wl, loc)
-            P = self._P(wl, loc)
+        for loc, ng in zip((Loc.LEFT, Loc.CHANNEL, Loc.RIGHT), ng_array):
+            A = self.calc_area(wl, loc)
+            P = self.calc_P(wl, loc)
             if P == 0:
                 # no water in this part of channel
                 continue
             R = A / P
-            K += A * R ** (2 / 3) / (ng + self._nf(wl, loc))
+            K += A * R ** (2 / 3) / (ng + self.calc_nf(wl, loc))
 
         assert K > 0, "No water"
 
