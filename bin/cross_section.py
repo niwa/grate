@@ -3,9 +3,8 @@ import numpy as np
 import pandas as pd
 from enum import Enum
 from functools import lru_cache
-from gin import GrateConfig, CrossSectionProfile
-from layers import LayerStack
-from dynamic_interpolator import DynamicInterpolator
+from gin import CrossSectionProfile
+from static_interpolator import StaticInterpolator
 
 
 class Loc(Enum):
@@ -17,11 +16,13 @@ class Loc(Enum):
 
 # properties that might be undefined and need interpolating
 XS_INTERP_PROPS = ["formrf", "bankd90", "bedrock_rl", "qsfact", "lsf"]
-LA_INTERP_PROPS = ["_acfd", "_scfd"]
 
 
 class CrossSection:
     """A loaded CrossSectionProfile, includes metadata, xy points, derived props
+
+    Geometry and scalar properties only.  The grain-size layers for every
+    chainage live in Channel._layers (a layer_arrays.LayerArrays).
 
     Currently handles Flume or River cross sections.  Braided channel will need
     subclass
@@ -30,7 +31,6 @@ class CrossSection:
     def __init__(
         self,
         xs: CrossSectionProfile,
-        cfg: GrateConfig,
         default_formrf,
         # wallrf,
     ):
@@ -51,85 +51,39 @@ class CrossSection:
         # can't set points yet since above variables might not be set
         # self._set_points(self.df)
 
-        self.layers = LayerStack(xs, cfg)
-
     def __setup_interpolators(self):
-        self._area_interpolator = {
-            Loc.LEFT: DynamicInterpolator(
-                lambda wl: self._area(wl, Loc.LEFT), xmin=self.left[:, 1].min()
+
+        # bank interpolators take elevations, and channel takes depths
+        #
+        # but all the lambdas have to take elevation, so for channel add on
+        # min_bed_level
+        #
+        bl = self.calc_min_bed_level()
+        for name in ("area", "P", "Bwet", "nf"):
+            setattr(
+                self,
+                f"_{name}_interpolator",
+                {
+                    Loc.LEFT: StaticInterpolator(
+                        lambda wl: getattr(self, f"_{name}")(wl, Loc.LEFT),
+                        self.left[:, 1],
+                    )
+                    if len(self.left)
+                    else None,
+                    Loc.CHANNEL: StaticInterpolator(
+                        lambda depth: getattr(self, f"_{name}")(
+                            depth + bl, Loc.CHANNEL
+                        ),
+                        self.channel[:, 1] - self.channel[:, 1].min(),
+                    ),
+                    Loc.RIGHT: StaticInterpolator(
+                        lambda wl: getattr(self, f"_{name}")(wl, Loc.RIGHT),
+                        self.right[:, 1],
+                    )
+                    if len(self.right)
+                    else None,
+                },
             )
-            if len(self.left)
-            else None,
-            Loc.CHANNEL: DynamicInterpolator(
-                lambda depth: self._area(
-                    depth + self.min_bed_level,
-                    Loc.CHANNEL,
-                ),
-                xmin=0,
-            ),
-            Loc.RIGHT: DynamicInterpolator(
-                lambda wl: self._area(wl, Loc.RIGHT), xmin=self.right[:, 1].min()
-            )
-            if len(self.right)
-            else None,
-        }
-        self._P_interpolator = {
-            Loc.LEFT: DynamicInterpolator(
-                lambda wl: self.__P(wl, Loc.LEFT), xmin=self.left[:, 1].min()
-            )
-            if len(self.left)
-            else None,
-            Loc.CHANNEL: DynamicInterpolator(
-                lambda depth: self.__P(
-                    depth + self.min_bed_level,
-                    Loc.CHANNEL,
-                ),
-                xmin=0,
-            ),
-            Loc.RIGHT: DynamicInterpolator(
-                lambda wl: self.__P(wl, Loc.RIGHT), xmin=self.right[:, 1].min()
-            )
-            if len(self.right)
-            else None,
-        }
-        self._nf_interpolator = {
-            Loc.LEFT: DynamicInterpolator(
-                lambda wl: self.__nf(wl, Loc.LEFT), xmin=self.left[:, 1].min()
-            )
-            if len(self.left)
-            else None,
-            Loc.CHANNEL: DynamicInterpolator(
-                lambda depth: self.__nf(
-                    depth + self.min_bed_level,
-                    Loc.CHANNEL,
-                ),
-                xmin=0,
-            ),
-            Loc.RIGHT: DynamicInterpolator(
-                lambda wl: self.__nf(wl, Loc.RIGHT), xmin=self.right[:, 1].min()
-            )
-            if len(self.right)
-            else None,
-        }
-        self._Bwet_interpolator = {
-            Loc.LEFT: DynamicInterpolator(
-                lambda wl: self._Bwet(wl, Loc.LEFT), xmin=self.left[:, 1].min()
-            )
-            if len(self.left)
-            else None,
-            Loc.CHANNEL: DynamicInterpolator(
-                lambda depth: self._Bwet(
-                    depth + self.min_bed_level,
-                    Loc.CHANNEL,
-                ),
-                xmin=0,
-            ),
-            Loc.RIGHT: DynamicInterpolator(
-                lambda wl: self._Bwet(wl, Loc.RIGHT), xmin=self.right[:, 1].min()
-            )
-            if len(self.right)
-            else None,
-        }
 
     @classmethod
     def resolve_interpolated_properties(cls, xss: dict):
@@ -137,27 +91,21 @@ class CrossSection:
 
         cs = sorted(xss)
 
-        def interp(cidx: int, prop: str, attr: str | None = None):
-            """Interpolate at chainidx the given property.
-
-            with attr == "layers" we are working on xs.layers
-            """
-
-            def get_obj(xs):
-                return getattr(xs, attr) if attr else xs
+        def interp(cidx: int, prop: str):
+            """Interpolate at chainidx the given property."""
 
             i = cs.index(cidx)
 
             left = None
             for c in reversed(cs[:i]):
-                val = getattr(get_obj(xss[c]), prop)
+                val = getattr(xss[c], prop)
                 if not (isinstance(val, str) and val == "Interp"):
                     left = c
                     break
 
             right = None
             for c in cs[i + 1 :]:
-                val = getattr(get_obj(xss[c]), prop)
+                val = getattr(xss[c], prop)
                 if not (isinstance(val, str) and val == "Interp"):
                     right = c
                     break
@@ -167,8 +115,8 @@ class CrossSection:
                     f"Can't interp {prop!r} at chainage {cidx}: no valid cross-sections"
                 )
 
-            left_value = getattr(get_obj(xss[left]), prop)
-            right_value = getattr(get_obj(xss[right]), prop)
+            left_value = getattr(xss[left], prop)
+            right_value = getattr(xss[right], prop)
 
             f = (cidx - left) / (right - left)
 
@@ -179,14 +127,8 @@ class CrossSection:
                 if getattr(xss[c], prop) == "Interp":
                     setattr(xss[c], prop, interp(c, prop))
 
-            for prop in LA_INTERP_PROPS:
-                val = getattr(xss[c].layers, prop)
-                if isinstance(val, str) and val == "Interp":
-                    setattr(xss[c].layers, prop, interp(c, prop, "layers"))
-
         for xs in xss.values():
             xs._set_points(xs.df)
-            # xs.layers._set_grain_props()
 
     def _set_points(self, df):
         """Set profile points and calculate derived properties."""
@@ -214,8 +156,8 @@ class CrossSection:
         """Return an approximate interpolation between two cross sections.
 
         Geometry is taken from the closer cross section and shifted to the
-        interpolated mean bed level. Numeric properties adn sediment-layer
-        properties linearly interpolated.
+        interpolated mean bed level. Numeric properties linearly interpolated.
+        (Sediment layers are interpolated in Channel, see LayerArrays.from_config.)
 
         Parameters
         ----------
@@ -262,22 +204,7 @@ class CrossSection:
         df = source.df.copy()
         df["y"] += target_bed - source.mean_bed_level
         cs._set_points(df)
-        cs.layers = source.layers.interpolate(other.layers, f, chainidx)
         return cs
-
-    def calc_d90(self):
-        """d90 as np.array([left, channel, right])"""
-        ch = self.layers.calc_d90()
-        if self.bankd90 is None:
-            return np.array([ch, ch, ch])
-        return np.array([self.bankd90, ch, self.bankd90])
-
-    def calc_ng(self):
-        """Grain roughness as np.array([left, channel, right])"""
-        return 0.044 * self.calc_d90() ** (1 / 6)
-
-    def f_interface(self, aggrading: bool, p: float):
-        return self.layers.f_interface(aggrading, p)
 
     def _split_pts_into_three(self, df):
         """Return entire profile, left, channel and right profiles as NumPy arrays.
@@ -347,9 +274,6 @@ class CrossSection:
         self.min_bed_level += dy
         self.mean_bed_level += dy
 
-    # def grain_stress(self, hydro):
-    #     return self.layers.grain_stress(hydro)
-
     def _wetted_segments(self, wl: float, loc: Loc):
         """Yield roughness, perimeter, width and area for each wetted segment."""
 
@@ -398,7 +322,7 @@ class CrossSection:
 
         return tuple(result)
 
-    def Bchan(self):
+    def calc_Bchan(self):
         """Return channel width"""
         return self.channel[-1, 0] - self.channel[0, 0]
 
@@ -441,7 +365,7 @@ class CrossSection:
             return 0.0
         return interp.eval(wl - self.min_bed_level if loc is Loc.CHANNEL else wl)
 
-    def __P(self, wl: float, loc: Loc):
+    def _P(self, wl: float, loc: Loc):
         """Wetted perimeter for given water level."""
         return sum(p for _, p, _, _ in self._wetted_segments(wl, loc))
 
@@ -460,7 +384,7 @@ class CrossSection:
             return 0.0
         return interp.eval(wl - self.min_bed_level if loc is Loc.CHANNEL else wl)
 
-    def __nf(self, wl: float, loc: Loc):
+    def _nf(self, wl: float, loc: Loc):
         """Return form roughness for the wetted cross-section.
 
         formrf * sum_k (r_k * p_k) / P
@@ -479,51 +403,6 @@ class CrossSection:
 
         # don't need to multiply by formrf since roughness already done that
         return weighted_p / peri if peri != 0 else 0
-
-    # def calc_Qb_jli(self, hydro):
-    #     """Return bed material transport rate 2darray
-    #
-    #     Parameters
-    #     ----------
-    #     t: pd.Timestamp
-    #         Time
-    #
-    #     Returns
-    #     -------
-    #     np.array:
-    #         nbins x nlith 2d array.  (j, li) element is bed transport for li
-    #         lith group and j proportion size
-    #     """
-    #     # FIXME, can we avoid passing hydro in
-    #     return self.layers.qb_jli(hydro) * self.calc_Bwet(hydro.get_wl()[self.chainidx])
-
-    def get_acfd(self):
-        return self.layers.get_acfd()
-
-    def update_alayer_proportions(self, df: np.ndarray):
-        self.layers.add_to_acfd(df)
-        # the ng cache needs invalidating since acfd change means d90 changes
-        # self.ng.cache_clear()
-
-    # @lru_cache(maxsize=10000)
-    # def ng(self, loc: Loc):
-    #     # FIXME, should cache in channel
-    #     """Grain roughness in left/channel/right"""
-    #     return 0.044 * self.calc_d90(loc) ** (1 / 6)
-
-    def calc_conveyance_using_wl(self, wl: float, ng_array):
-        """K conveyance
-
-        sum over left, main, right of
-            A * R^(2/3) / (ng + nf)
-
-        where
-            A is the area
-            R is A/P
-            ng is grain roughness
-            nf is form roughness
-        """
-        return self._conveyance_cached(wl, tuple(ng_array.tolist()), self.min_bed_level)
 
     def calc_conveyance(self, A: np.array, P: np.array, nf: np.array, ng: np.array):
         """Calculate conveyance using known A, P, nf, ng
@@ -548,8 +427,7 @@ class CrossSection:
         assert K > 0, "No water"
         return K
 
-    @lru_cache(maxsize=10000)
-    def _conveyance_cached(self, wl: float, ng_array: tuple, min_bed_level: float):
+    def calc_conveyance_using_wl(self, wl: float, ng_array):
         """K conveyance
 
         sum over left, main, right of
@@ -560,9 +438,6 @@ class CrossSection:
             R is A/P
             ng is grain roughness
             nf is form roughness
-
-        Need to pass in the ngs since they might change without d or
-        min_bed_level changing because acfd (and then d90) changes
         """
         K = 0
         for loc, ng in zip((Loc.LEFT, Loc.CHANNEL, Loc.RIGHT), ng_array):
@@ -574,7 +449,10 @@ class CrossSection:
             R = A / P
             K += A * R ** (2 / 3) / (ng + self.calc_nf(wl, loc))
 
-        assert K > 0, "No water"
+        if K <= 0:
+            raise ValueError(
+                f"No water {K=} {wl=} {ng_array=} {self.left=} {self.channel=} {self.right=}"
+            )
 
         return K
 

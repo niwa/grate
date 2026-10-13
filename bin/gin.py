@@ -331,42 +331,80 @@ SedimentBoundary = typing.Annotated[
 ]
 
 
-@dataclass
-class RuntimeSedimentBoundary:
-    ordinate: float
-    type: str
-    nbins: int
-    nlith: int
-    value: np.ndarray | pd.DataFrame
+class RuntimeSedimentBoundaries:
+    """A combination all the sediment boundary conditions into one datastructure."""
 
-    def unravel(self, x):
-        return np.asarray(x).reshape(self.nbins, self.nlith)
+    def __init__(self, ordinates, times, values):
+        """
+
+        Parameters
+        ----------
+        ordinates: list
+            A sorted list of ordinate values
+
+        times: pd.DatetimeIndex
+
+        values: np.array
+            A 4d array with shape (ntimes, nordinates, nbins, nlith)
+        """
+        self.ordinates = np.asarray(ordinates)
+        self.__times = times
+        self.__values = values
 
     def value_at(self, t: pd.Timestamp) -> np.ndarray:
-        """Return nbins x nlith volume/s sediment transport"""
+        """Return sediment transport for all boundaries.
 
-        if self.type == "const":
-            return self.value
+        Returns an array of shape (nboundaries, nbins, nlith).
+        """
+        if self.__times is None:
+            return self.__values
 
-        s = self.value
-        if t in s.index:
-            return self.unravel(s.loc[t])
+        pos = self.__times.searchsorted(t)
 
-        # have to interpolate
-        pos = s.index.searchsorted(t)
-
-        # bounds check
         if pos == 0:
-            return self.unravel(s.iloc[0])
-        if pos == len(s):
-            return self.unravel(s.iloc[-1])
+            return self.__values[0]
 
-        t0 = s.index[pos - 1]
-        t1 = s.index[pos]
-        v0 = s.iloc[pos - 1]
-        v1 = s.iloc[pos]
+        if pos == len(self.__times):
+            return self.__values[-1]
+
+        if self.__times[pos] == t:
+            return self.__values[pos]
+
+        t0 = self.__times[pos - 1]
+        t1 = self.__times[pos]
+        v0 = self.__values[pos - 1]
+        v1 = self.__values[pos]
         fraction = (t - t0) / (t1 - t0)
-        return self.unravel(v0 + fraction * (v1 - v0))
+        return v0 + fraction * (v1 - v0)
+
+    def rechainage(self, cs):
+        """Move each sediment input to the first new chainage >= its
+        original ordinate. All other chainages receive zero.
+        """
+        cs = np.asarray(cs)
+
+        # New chainage receiving each original boundary's sediment.
+        indices = np.searchsorted(cs, self.ordinates, side="left")
+
+        # A boundary beyond the last new chainage cannot be assigned.
+        valid = indices < len(cs)
+        indices = indices[valid]
+
+        if self.__times is None:
+            result = np.zeros(
+                (len(cs), *self.__values.shape[1:]), dtype=self.__values.dtype
+            )
+            np.add.at(result, indices, self.__values[valid])
+        else:
+            result = np.zeros(
+                (len(self.__times), len(cs), *self.__values.shape[2:]),
+                dtype=self.__values.dtype,
+            )
+            for t in range(len(self.__times)):
+                np.add.at(result[t], indices, self.__values[t, valid])
+
+        self.ordinates = cs
+        self.__values = result
 
 
 class SedimentExtraction(GrateBase):
@@ -433,9 +471,7 @@ class GrateConfig(GrateBase):
         default=None
     )
     sediment_boundary: list[SedimentBoundary]
-    _processed_sediment_boundary: list[RuntimeSedimentBoundary] = p.PrivateAttr(
-        default_factory=list
-    )
+    _processed_sediment_boundary: RuntimeSedimentBoundaries
 
     sediment_extraction: list[SedimentExtraction] = []
     sediment_ripping: list[SedimentRipping] = []
@@ -462,7 +498,9 @@ class GrateConfig(GrateBase):
             self.inflow_boundary, self.simulation_time.start, self.simulation_time.end
         )
         self._load_downstream_boundary()
-        self._load_sediment_boundary_timeseries()
+        self._load_sediment_boundary_timeseries(
+            self.simulation_time.start, self.simulation_time.end
+        )
         self._check_sediment_boundary()
         self._check_unit_changes()
         return self
@@ -602,53 +640,106 @@ class GrateConfig(GrateBase):
                 value=val,
             )
 
-    def _load_sediment_boundary_timeseries(self):
-        self._processed_sediment_boundary.clear()
+    def _load_sediment_boundary_timeseries(self, start, end):
         gs = self.grain_size_profiles
         nbins = gs.num_bins
         nlith = gs.num_lith
         densities = gs.sediment_densities
 
-        for boundary in self.sediment_boundary:
+        boundaries = sorted(self.sediment_boundary, key=lambda b: b.ordinate)
+
+        if not boundaries:
+            raise ValueError("At least one sediment boundary is required")
+
+        if len({b.ordinate for b in boundaries}) != len(boundaries):
+            raise ValueError("Sediment boundary ordinates must be unique")
+
+        # each bc is either a consant (nbins, nlith) 2d array, or a dataframe
+        # containing flattened values for each timestep
+        #  entries is a list ('type', val)
+        entries = []
+        timestamps = [pd.Timestamp(start), pd.Timestamp(end)]
+
+        for bdy in boundaries:
             # matrix nbins x nlith
             jliprops = get_grain_props(
-                boundary.group - 1, gs.grain_size_cfds, gs.lithfractions
+                bdy.group - 1, gs.grain_size_cfds, gs.lithfractions
             )
 
             # sum the columns to get weights
             rho = np.average(densities, weights=jliprops.sum(axis=0))
 
             # val is kg/s
-            val = boundary.value
-            if boundary.type == "ts":
+            if bdy.type == "ts":
                 try:
-                    val = pd.read_csv(val, index_col=0, parse_dates=True)[
-                        "unknown_0_FIXME"
+                    val = pd.read_csv(bdy.value, index_col=0, parse_dates=True)[
+                        "sediment feed rate"
                     ].sort_index()
                     self._chk_csv_covers_timeperiod(
-                        f"Sediment ts {boundary.value} at {boundary.ordinate}", val
+                        f"Sediment ts {bdy.value} at {bdy.ordinate}", val
                     )
                 except Exception as exp:
-                    raise ValueError(f"Could not parse {boundary.value}: {exp}")
-                val *= boundary.scale
-                # make each row be val * jliprops unravelled
+                    raise ValueError(f"Could not parse {bdy.value}: {exp}")
+
+                if not val.index.is_unique:
+                    raise ValueError(f"Duplicate timestamps in {bdy.value}")
+
+                # trim val so we don't keep more times than we need
+                start_pos = val.index.searchsorted(start, side="left")
+                end_pos = val.index.searchsorted(end, side="right")
+                lo = max(0, start_pos - 1)
+                hi = min(len(val), end_pos + 1)
+                val = val.iloc[lo:hi]
+
+                # scale each row, and then val * jliprops unravelled
+                val *= bdy.scale
                 values = val.to_numpy()[:, None] * jliprops.ravel()[None, :]
-                val = pd.DataFrame(values, index=val.index)
+                values /= rho
+                frame = pd.DataFrame(values, index=val.index)
+                entries.append(("ts", frame))
+
+                # keep track of the timestamps inside sim period
+                timestamps.extend(val.index[(val.index >= start) & (val.index <= end)])
             else:
-                val *= jliprops
+                values = np.asarray(bdy.value) * jliprops / rho
+                entries.append(("const", values))
 
-            # divide by density to get val in volume/s
-            val /= rho
-
-            self._processed_sediment_boundary.append(
-                RuntimeSedimentBoundary(
-                    ordinate=boundary.ordinate,
-                    type=boundary.type,
-                    nbins=nbins,
-                    nlith=nlith,
-                    value=val,
-                )
+        # If everything is constant, there is no need for a time dimension
+        if all(kind == "const" for kind, _ in entries):
+            values = np.stack([data for _, data in entries])
+            self._processed_sediment_boundary = RuntimeSedimentBoundaries(
+                [b.ordinate for b in boundaries], None, values
             )
+            return
+
+        # common time axis, including simulation start and end
+        times = pd.DatetimeIndex(timestamps).unique().sort_values()
+
+        # Interpolate each boundary onto the common time axis.
+        # Retain original observations outside the common index while
+        # interpolating, so the start/end values can use their neighbours.
+        # a list of 3d arrays with shape (ntimes, nbins, nlith).  ith value
+        # is for ith ordinate
+        all_values = []
+
+        for kind, data in entries:
+            if kind == "const":
+                all_values.append(np.broadcast_to(data, (len(times), nbins, nlith)))
+            else:
+                data = (
+                    data.reindex(data.index.union(times))
+                    .sort_index()
+                    .interpolate(method="time")
+                    .reindex(times)
+                )
+                all_values.append(data.to_numpy().reshape(len(times), nbins, nlith))
+
+        # (ntimes, nboundaries, nbins, nlith)
+        values = np.stack(all_values, axis=1)
+
+        self._processed_sediment_boundary = RuntimeSedimentBoundaries(
+            [b.ordinate for b in boundaries], times, values
+        )
 
     def _check_sediment_boundary(self):
         cm = self.discretisation.chainage_min

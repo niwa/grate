@@ -103,7 +103,7 @@ class Output:
         )
 
     def _get_mean_bed_level(self):
-        return np.array([self._chan.get_mean_bed_level(c) for c in self._cidx])
+        return self._chan.get_mean_bed_level()
 
     def get_mean_bed_level(self):
         return xr.DataArray(
@@ -114,7 +114,7 @@ class Output:
         )
 
     def _get_min_bed_level(self):
-        return np.array([self._chan.get_min_bed_level(c) for c in self._cidx])
+        return self._chan.get_min_bed_level()
 
     def get_min_bed_level(self):
         return xr.DataArray(

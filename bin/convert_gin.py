@@ -243,7 +243,7 @@ def parse_sediment_boundary_line(line, kv, bdir):
         fname = pathlib.Path(PureWindowsPath(ma.group(4)))
         infile = bdir / fname
         outfile = infile.with_suffix(".csv")
-        convert_timeseries(infile, outfile, "unknown_0_FIXME")
+        convert_timeseries(infile, outfile, "sediment feed rate")
         kv.append(
             {
                 "ordinate": float(ma.group(1)),

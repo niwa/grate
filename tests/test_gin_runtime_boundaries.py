@@ -8,7 +8,7 @@ TEST_DATA = Path(__file__).parent / "data"
 from gin import (
     RuntimeInflowBoundary,
     RuntimeDownstreamBoundary,
-    RuntimeSedimentBoundary,
+    RuntimeSedimentBoundaries,
     InflowBoundaryConst,
     InflowBoundaryTS,
 )
@@ -160,33 +160,112 @@ class TestRuntimeDownstreamBoundary:
         assert result == {"elevation": pytest.approx(2.0)}
 
 
-class TestRuntimeSedimentBoundary:
-    def test_unravel_reshapes_to_nbins_by_nlith(self):
-        import numpy as np
+class TestRuntimeSedimentBoundaries:
+    @pytest.fixture
+    def ordinates(self):
+        return [4.0, 7.0, 9.0]
 
-        b = RuntimeSedimentBoundary(
-            ordinate=0.0, type="const", nbins=2, nlith=3, value=None
+    @pytest.fixture
+    def times(self):
+        return pd.DatetimeIndex(["2020-01-01 00:00", "2020-01-01 02:00"])
+
+    @pytest.fixture
+    def make_boundaries(self, ordinates):
+        """Factory fixture creating constant or time-dependent boundaries."""
+
+        def _make(times=None):
+            if times is None:
+                # Shape: (nboundaries, nbins, nlith)
+                values = np.array([10.0, 20.0, 30.0]).reshape(3, 1, 1)
+            else:
+                # Shape: (ntimes, nboundaries, nbins, nlith)
+                values = np.array(
+                    [
+                        [10.0, 20.0, 30.0],
+                        [20.0, 40.0, 60.0],
+                    ]
+                ).reshape(2, 3, 1, 1)
+
+            return RuntimeSedimentBoundaries(ordinates, times, values)
+
+        return _make
+
+    @pytest.fixture
+    def constant_boundaries(self, make_boundaries):
+        return make_boundaries()
+
+    @pytest.fixture
+    def time_boundaries(self, make_boundaries, times):
+        return make_boundaries(times)
+
+    def get_inputs(self, bc, t=None):
+        """Extract the scalar input at each chainage for easy assertions."""
+        values = bc.value_at(t)
+        return values[:, 0, 0]
+
+    def test_constant_boundaries(self, constant_boundaries):
+        np.testing.assert_array_equal(
+            self.get_inputs(constant_boundaries),
+            [10.0, 20.0, 30.0],
         )
-        flat = [1, 2, 3, 4, 5, 6]
-        result = b.unravel(flat)
-        np.testing.assert_array_equal(result, np.array([[1, 2, 3], [4, 5, 6]]))
 
-    def test_const_value_at_returns_stored_array(self):
-        import numpy as np
+    def test_rechainage_exact_matches(self, constant_boundaries):
+        bc = constant_boundaries
+        bc.rechainage([3, 4, 5, 6, 7, 8, 9, 10, 11])
 
-        arr = np.array([[1.0, 2.0], [3.0, 4.0]])
-        b = RuntimeSedimentBoundary(
-            ordinate=0.0, type="const", nbins=2, nlith=2, value=arr
+        np.testing.assert_array_equal(
+            self.get_inputs(bc),
+            [0, 10, 0, 0, 20, 0, 30, 0, 0],
         )
-        np.testing.assert_array_equal(b.value_at(pd.Timestamp("2020-01-01")), arr)
 
-    def test_ts_value_at_interpolates_and_unravels(self):
-        import numpy as np
+    def test_rechainage_moves_inputs_downstream(self, constant_boundaries):
+        bc = constant_boundaries
+        bc.rechainage([3, 3.9, 5, 6, 7, 8.9, 9.2])
 
-        idx = pd.to_datetime(["2020-01-01", "2020-01-02"])
-        # each row is a flattened nbins*nlith vector
-        df = pd.DataFrame([[0.0, 0.0, 0.0, 0.0], [4.0, 8.0, 12.0, 16.0]], index=idx)
-        b = RuntimeSedimentBoundary(ordinate=0.0, type="ts", nbins=2, nlith=2, value=df)
-        result = b.value_at(pd.Timestamp("2020-01-01 12:00"))
-        expected = np.array([[2.0, 4.0], [6.0, 8.0]])
-        np.testing.assert_allclose(result, expected)
+        np.testing.assert_array_equal(
+            self.get_inputs(bc),
+            [0, 0, 10, 0, 20, 0, 30],
+        )
+
+    def test_rechainage_sums_inputs_at_same_chainage(self, constant_boundaries):
+        bc = constant_boundaries
+        bc.rechainage([3, 7, 10])
+
+        np.testing.assert_array_equal(
+            self.get_inputs(bc),
+            [0, 30, 30],
+        )
+
+    def test_rechainage_drops_inputs_beyond_last_chainage(self, constant_boundaries):
+        bc = constant_boundaries
+        bc.rechainage([3, 5, 8])
+
+        np.testing.assert_array_equal(
+            self.get_inputs(bc),
+            [0, 10, 20],
+        )
+
+    def test_rechainage_with_time_dependent_values(self, time_boundaries, times):
+        bc = time_boundaries
+        bc.rechainage([3, 7, 10])
+
+        np.testing.assert_array_equal(
+            self.get_inputs(bc, times[0]),
+            [0, 30, 30],
+        )
+
+        np.testing.assert_array_equal(
+            self.get_inputs(bc, times[1]),
+            [0, 60, 60],
+        )
+
+    def test_time_interpolation_after_rechainage(self, time_boundaries):
+        bc = time_boundaries
+        bc.rechainage([3, 7, 10])
+
+        t = pd.Timestamp("2020-01-01 01:00")
+
+        np.testing.assert_allclose(
+            self.get_inputs(bc, t),
+            [0, 45, 45],
+        )

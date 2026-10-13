@@ -47,7 +47,7 @@ def try_to_num(val: str):
     return val
 
 
-def get_bracket_for_monotonic(f, x0, lower, max_growth: float | None = None, maxits=50):
+def get_bracket_for_monotonic(f, x0, lower, max_growth: float | None = None, maxits=20):
     """Get bracket for monotonic f
 
     Parameters
@@ -115,7 +115,7 @@ def get_bracket_for_monotonic(f, x0, lower, max_growth: float | None = None, max
     x = x0
     for _ in range(maxits):
         x = (x + lower) / 2 if search_left else lower + 2 * (x - lower)
-        if max_growth and x > lower + max_growth:
+        if x <= lower or (max_growth and x > lower + max_growth):
             return None
         fx = f(x)
         if (fx <= 0) if fx0 > 0 else (fx >= 0):

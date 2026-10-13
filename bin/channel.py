@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from gin import GrateConfig
 from cross_section import CrossSection, Loc
+from layer_arrays import LayerArrays
 
 
 class Channel:
@@ -18,7 +19,11 @@ class Channel:
         self._cs = self._chainpts()
         self._nc = len(self._cs)
         self._xss = self._get_interpolated_cross_sections()
+        self._init_layer_arrays()
         self._init_dt()
+
+        # these don't change over time
+        self._Bchan = np.array([xs.calc_Bchan() for xs in self._xss])
 
         # these are set each iteration AFTER wl known
         self._Bwet = np.empty(len(self._cs))
@@ -39,17 +44,30 @@ class Channel:
         self._d90 = np.empty((len(self._cs), 3))
         self._ng = np.empty((len(self._cs), 3))
 
+    def _init_layer_arrays(self):
+        """Grain-size layer state for every chainage point, as arrays with a
+        leading chainage axis (acfd, scfd: nc x nbins x nlith).  This does the
+        "Interp" resolution and interpolation to self._cs that used to be done
+        per cross section by LayerStack.
+        """
+        self._layers = LayerArrays.from_config(self._cfg, self._cs)
+
+        # None (use channel d90 for banks too) becomes nan
+        self._bankd90 = np.array(
+            [np.nan if xs.bankd90 is None else xs.bankd90 for xs in self._xss]
+        )
+
     def _init_dt(self):
         # start out at max dt which the cfg has set under dt
         self._dt = self.max_dt = self._cfg.max_dt
 
         # start out 10% of max rate
         self.cdt = self._cfg.simulation_time.cdt
-        self.max_deta_over_dt = 0.1 * self.cdt / self._dt
+        self.max_dydt = 0.1 * self.cdt / self._dt
 
     def _set_next_dt(self):
-        self.max_deta_over_dt = max(1e-10, self.max_deta_over_dt)
-        self._dt = min(self.cdt / self.max_deta_over_dt, self.max_dt)
+        self.max_dydt = max(1e-10, self.max_dydt)
+        self._dt = min(self.cdt / self.max_dydt, self.max_dt)
 
     def get_dt(self):
         return self._dt
@@ -102,7 +120,7 @@ class Channel:
 
         for xs in self._cfg.cross_sections.profiles:
             c = xs.chainage
-            xss[c] = CrossSection(xs, self._cfg, formrf)  # , wallrf)
+            xss[c] = CrossSection(xs, formrf)  # , wallrf)
 
         # check min/max chainage
         assert min(xss.keys()) <= self._cs[0], (
@@ -128,7 +146,6 @@ class Channel:
             # Exact cross section
             if cpt in xss:
                 xss[cpt].chainidx = i
-                xss[cpt].layers.chainidx = i
                 ixss.append(xss[cpt])
                 continue
 
@@ -162,79 +179,69 @@ class Channel:
         """Return area of water between bed and wl"""
         return self._xss[c].calc_area(wl, loc)
 
-    def calc_Qb_jli(self, c: int):
-        """Return bed material transport rate 2darray
-
-        Parameters
-        ----------
-        t: pd.Timestamp
-            Time
+    def calc_Qb_jli(self):
+        """Return bed material transport rate for ALL chainages
 
         Returns
         -------
         np.array:
-            nbins x nlith 2d array.  (j, li) element is bed transport for li
-            lith group and j proportion size
+            nc x nbins x nlith 3d array.  (c, j, li) element is bed transport
+            at chainage index c for li lith group and j proportion size
         """
         return (
-            self._xss[c].layers.qb_jli(
-                self._grain_shear_velocity[c], self._sand_fraction[c], self._dsm[c]
+            self._layers.qb_jli(
+                self._grain_shear_velocity, self._sand_fraction, self._dsm
             )
-            * self._Bwet[c]
+            * self._Bwet[:, None, None]
         )
 
     def calc_conveyance(self, c: int, wl: float):
-        return self._xss[c].calc_conveyance_using_wl(wl, self._ng[c])
+        try:
+            return self._xss[c].calc_conveyance_using_wl(wl, self._ng[c])
+        except Exception as e:
+            raise ValueError(
+                f"Couldn't cal convey for cross-section {c}, {self._min_bed_level[c]=}: {e}"
+            )
+        # return self._xss[c].calc_conveyance_using_wl(wl, self._ng[c])
+
+    def set_transport_rates(self):
+        self._Qb_jli[:] = self.calc_Qb_jli()
 
     def propogate_sediment(self, t: pd.Timestamp, hydro):
 
-        # keep track of dy's to update max_deta_over_dt
-        dys = []
+        # sediment rates at all chainages, nc x nbins x nlith
+        bdy_sed_rate = self._cfg._processed_sediment_boundary.value_at(t)
 
-        for c in range(1, self._nc):
-            dc = self._cs[c] - self._cs[c - 1]
+        # sediment transport rates
+        up_Qb_jli = self._Qb_jli[:-1] + bdy_sed_rate[:-1]
+        my_Qb_jli = self._Qb_jli[1:]
 
-            # nbins x nlith rate of sediment coming in from boundary
-            # FIXME, want this like inflow bc
-            bdy_sediment_rate = sum(
-                sb.value_at(t)
-                for sb in self._cfg._processed_sediment_boundary
-                if self._cs[c - 1] <= sb.ordinate < self._cs[c]
-            )
+        dc = np.diff(self._cs)
+        fact = 1.0 / dc / (1 - self.poro) / self._Bchan[1:]
 
-            up_Qb_jli = self._Qb_jli[c - 1] + bdy_sediment_rate
-            my_Qb_jli = self._Qb_jli[c]
-
-            # FIXME, we should return these.  Then do output.
-            # calculate dy_by_dt:
-            #
-            # fact = 1 / dc / (1 - self.poro) / self._xss[c].Bchan()
-            # dy_by_dt = (up_Qb_jli.sum() - my_Qb_jli.sum()) * fact
-            #
-            # now set next dt using
-            # dt = min(max_dt, max over all crosssections(dy_by_dt) / cdt)
-            #
-            # now can calculate dy and df to update bed and the acfd/scfd
-
-            # constants...
-            fact = self._dt / dc / (1 - self.poro) / self._xss[c].Bchan()
-
-            dy = (up_Qb_jli.sum() - my_Qb_jli.sum()) * fact
-            self._xss[c].aggrade_bed(dy)
-            dys.append(dy)
-
-            p = my_Qb_jli / my_Qb_jli.sum()
-            df = (
-                (up_Qb_jli - my_Qb_jli) * fact
-                - self._xss[c].f_interface(dy > 0, p) * dy
-            ) / self._cfg.morphological.la
-
-            self._xss[c].update_alayer_proportions(df)
-
-            # FIXME, change storage layer f_jli
-
-        self.max_deta_over_dt = max(dys)
+        # dy by dt to figure out next dt
+        dydt = fact * (up_Qb_jli.sum(axis=(1, 2)) - my_Qb_jli.sum(axis=(1, 2)))
+        self.max_dydt = max(np.abs(dydt))
         self._set_next_dt()
+
+        # now get the dys
+        fact *= self._dt
+        dy = dydt * self._dt
+
+        # Vectorise the sediment proportions and flux differences.
+        p = my_Qb_jli / my_Qb_jli.sum(axis=(1, 2))[:, None, None]
+        flux_diff = (up_Qb_jli - my_Qb_jli) * fact[:, None, None]
+
+        # aggrade/degrade cross-section channel
+        for i, c in enumerate(range(1, self._nc)):
+            self._xss[c].aggrade_bed(dy[i])
+
+        # Layer state is one array: update every chainage in a single shot
+        self._layers.update_active_layer(
+            dy, flux_diff, p, self._cfg.morphological.la, rows=slice(1, None)
+        )
+
+        # FIXME, change storage layer f_jli
 
         # now we can update all the cache variables
         self.set_layer_arrays(hydro)
@@ -242,19 +249,28 @@ class Channel:
     def set_layer_arrays(self, hydro, do_gsv: bool = True):
         """don't do gsb on init since Sf and vel wrong so can't calculate gsm"""
 
-        Sf = hydro.get_Sf()
-        v = hydro.get_vel()
-        for c in range(len(self._cs)):
-            self._d90[c] = self._xss[c].calc_d90()
-            self._ng[c] = self._xss[c].calc_ng()
-            if do_gsv:
-                gsv = self._xss[c].layers.calc_gsv(Sf[c], v[c], self._d90[c, 1])
-                self._grain_shear_velocity[c] = gsv
-            else:
-                self._grain_shear_velocity[c] = 1
-            self._sand_fraction[c] = self._xss[c].layers.calc_sand_fraction()
-            self._dsm[c] = self._xss[c].layers.calc_dsm()
-            self._Qb_jli[c] = self.calc_Qb_jli(c)
+        lay = self._layers
+
+        # d90 as [left, channel, right]; banks use the channel value if
+        # the cross section has no bankd90
+        ch = lay.d90()
+        bank = np.where(np.isnan(self._bankd90), ch, self._bankd90)
+        self._d90[:] = np.column_stack([bank, ch, bank])
+        self._ng[:] = 0.044 * self._d90 ** (1 / 6)
+
+        if do_gsv:
+            self._grain_shear_velocity[:] = lay.gsv(
+                hydro.get_Sf(), hydro.get_vel(), self._d90[:, 1]
+            )
+        else:
+            self._grain_shear_velocity[:] = 1
+        self._sand_fraction[:] = lay.sand_fraction()
+        self._dsm[:] = lay.dsm()
+
+        # geometry, still per cross section
+        for c in range(self._nc):
+            self._min_bed_level[c] = self._xss[c].calc_min_bed_level()
+            self._mean_bed_level[c] = self._xss[c].calc_mean_bed_level()
 
     def set_profile_arrays(self, wl: np.array):
         """Hydrodynamics model has sorted wl, this is to update all the profile
@@ -266,11 +282,9 @@ class Channel:
                 self._area[c, j] = self.calc_area(c, w, loc)
                 self._P[c, j] = self._xss[c].calc_P(w, loc)
                 self._nf[c, j] = self._xss[c].calc_nf(w, loc)
-            self._conveyance[c] = self._xss[c].calc_conveyance(
-                self._area[c], self._P[c], self._nf[c], self._ng[c]
-            )
-            self._min_bed_level[c] = self._xss[c].calc_min_bed_level()
-            self._mean_bed_level[c] = self._xss[c].calc_mean_bed_level()
+            # self._conveyance[c] = self._xss[c].calc_conveyance(
+            #     self._area[c], self._P[c], self._nf[c], self._ng[c]
+            # )
 
 
 class River(Channel):

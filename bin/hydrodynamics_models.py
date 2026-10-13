@@ -21,8 +21,9 @@ class HydroDynamicModel:
         self._channel = chan
         self._cs = self._channel._chainpts()
 
-        # make sure the inflow boundary conditions know about (potentially) new chainage
+        # make sure the inflow and sediment boundary conditions know about (potentially) new chainage
         cfg._processed_inflow.rechainage(self._cs)
+        cfg._processed_sediment_boundary.rechainage(self._cs)
 
         # store these variables for current timestep
         self._Sf = np.empty(len(self._cs))
@@ -45,6 +46,10 @@ class HydroDynamicModel:
         else:
             v = self._calc_ds_wl(t)
 
+        # set cross-section/layer caches except for gsv which we must miss
+        # since not sensible hydraulics yet
+        self._channel.set_layer_arrays(self, do_gsv=False)
+
         # initialize water level to downstream value shifted by bed
         self._wl[-1] = v
         for c in range(len(self._cs) - 2, -1, -1):
@@ -56,10 +61,6 @@ class HydroDynamicModel:
 
         # starting flow
         self._flow = self._cfg._processed_inflow.get_flows(t)
-
-        # set cross-section/layer caches except for gsv which we must miss
-        # since not sensible hydraulics yet
-        self._channel.set_layer_arrays(self, do_gsv=False)
 
         # run the first step, this gets our Sf and vel set which allows
         # channel to initialize its variables
@@ -85,57 +86,6 @@ class HydroDynamicModel:
     def get_wl(self):
         return self._wl
 
-    # def A(self, c: int, wl: float | None = None):
-    #     """The area of the water at c chainage
-    #
-    #     Parameters
-    #     ----------
-    #     c: int
-    #         Chainage point along river in units of dc
-    #
-    #     wl: float
-    #         If None, then get the water level from self.wl, else calculate for this
-    #         water level
-    #
-    #     loc: Loc
-    #         If None, get the total area, otherwise just in this Loc (left, main
-    #         channel, or right bank0
-    #     """
-    #     if wl is None:
-    #         wl = self.wl[c]
-    #     return self._channel.area(c, wl, Loc.ALL)
-
-    # def conveyance(self, c: int, wl: float):
-    #     """K conveyance
-    #
-    #     sum over left, main, right of
-    #         A * R^(2/3) / (ng + nf)
-    #
-    #     where
-    #         A is the area
-    #         R is A/P
-    #         ng is grain roughness
-    #         nf is form roughness
-    #     """
-    #     return self._channel.conveyance(c, wl)
-
-    # def _S0(self, c: int):
-    #     """Bed slope at c"""
-    #     return self._channel.S0(c)
-
-    # # FIXME, probably shouldn't have this here
-    # def Bwet(self, c: int, wl: float | None = None):
-    #     """Water surface width"""
-    #     if wl is None:
-    #         wl = self.wl[c]
-    #     return self._channel.Bwet(c, wl)
-
-    # def R(self, c: int, wl: float | None = None):
-    #     """Hydraulic radius A/P over entire xsection"""
-    #     if wl is None:
-    #         wl = self.wl[c]
-    #     return self._channel.R(c, wl)
-
     def _calc_vel(self, c: int, wl: float):
         """The mean velocity, ie Q/A at current step"""
         return self._flow[c] / self._channel.calc_area(c, wl, Loc.ALL)
@@ -143,6 +93,9 @@ class HydroDynamicModel:
     def _calc_Sf(self, c: int, wl: float):
         """Return friction slope, ie. Q abs(Q) / K^2"""
         Q = self._flow[c]
+        # print(
+        #     f"calc_Sf at {c}, min_bed_level is {self._channel.get_min_bed_level()[c]}"
+        # )
         return Q * abs(Q) / self._channel.calc_conveyance(c, wl) ** 2
 
     def _calc_ds_wl(self, t: pd.Timestamp):

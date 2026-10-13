@@ -290,10 +290,6 @@ class LayerStack:
         else:
             return self._scfd
 
-    # # FIXME
-    # def get_acfd(self):
-    #     return self._acfd
-
     def add_to_acfd(self, df):
         self._acfd += df
 
