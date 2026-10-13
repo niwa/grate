@@ -29,6 +29,7 @@ class HydroDynamicModel:
         self._Sf = np.empty(len(self._cs))
         self._vel = np.empty(len(self._cs))
         self._flow = np.empty(len(self._cs))
+        self._cum_flow_vol = np.zeros(self._flow.shape)
         self._wl = np.empty(len(self._cs))
 
         self.initialize(self._cfg.simulation_time.start)
@@ -78,6 +79,10 @@ class HydroDynamicModel:
     def get_flow(self):
         """Previously calculated flow"""
         return self._flow
+
+    def get_cum_flow_vol(self):
+        """Previously calculated cummulative flow volume"""
+        return self._cum_flow_vol
 
     def get_Sf(self):
         """Previously calculated Sf"""
@@ -220,6 +225,8 @@ class QuasiSteadyModel(HydroDynamicModel):
             self._vel[i] = self._calc_vel(i, wl)
 
             # print(f"Finished {t=} {i=} {wl=}")
+
+        self._cum_flow_vol += self._flow * self._channel._dt
 
         # tell channel that wl is fixed for this iteration so it an store its
         # variables that depend on wl

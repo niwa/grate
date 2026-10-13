@@ -26,6 +26,13 @@ class Output:
 
         data_funs = {
             "water_level": self._get_water_level,
+            "flow": self._get_flow,
+            "dt": self._get_dt,
+            "timestep": self._get_timestep,
+            "cum_bed_level_change": self._get_cum_bed_level_change,
+            "cum_transport": self._get_cum_transport,
+            "cum_total_transport": self._get_cum_total_transport,
+            "cum_flow_vol": self._get_cum_flow_vol,
             "velocity": self._get_velocity,
             "grain_stress": self._get_grain_stress,
             "total_transport_rate": self._get_total_transport_rate,
@@ -38,12 +45,16 @@ class Output:
         self._v2np = {v: data_funs[v] for v in cfg.output.variables}
         self._v2da = {v: getattr(self, f"get_{v}") for v in cfg.output.variables}
 
+        # if we want cumulative bed level change, get the initial bed level now
+        if "cum_bed_level_change" in self._v2np:
+            self._initial_bed_level = self._get_min_bed_level().copy()
+
         # first step is written with xarray
         self._initialised = False
         self._epoch = None
 
     def _get_water_level(self):
-        return self._hmodel.get_wl().copy()
+        return self._hmodel.get_wl()
 
     def get_water_level(self):
         return xr.DataArray(
@@ -53,8 +64,48 @@ class Output:
             name="water_level",
         )
 
+    def _get_flow(self):
+        return self._hmodel.get_flow()
+
+    def get_flow(self):
+        return xr.DataArray(
+            self._get_flow(),
+            dims=("chainage",),
+            coords={"chainage": self._cs},
+            name="flow",
+        )
+
+    def _get_dt(self):
+        return self._chan._dt
+
+    def get_dt(self):
+        return xr.DataArray(
+            self._get_dt(),
+            name="dt",
+        )
+
+    def _get_cum_bed_level_change(self):
+        return self._get_min_bed_level() - self._initial_bed_level
+
+    def get_cum_bed_level_change(self):
+        return xr.DataArray(
+            self._get_cum_bed_level_change(),
+            dims=("chainage",),
+            coords={"chainage": self._cs},
+            name="cum_bed_level_change",
+        )
+
+    def _get_timestep(self):
+        return self.step
+
+    def get_timestep(self):
+        return xr.DataArray(
+            self._get_timestep(),
+            name="timestep",
+        )
+
     def _get_velocity(self):
-        return self._hmodel.get_vel().copy()
+        return self._hmodel.get_vel()
 
     def get_velocity(self):
         return xr.DataArray(
@@ -76,8 +127,49 @@ class Output:
             name="grain_stress",
         )
 
+    def _get_cum_flow_vol(self):
+        return self._hmodel.get_cum_flow_vol()
+
+    def get_cum_flow_vol(self):
+        return xr.DataArray(
+            self._get_cum_flow_vol(),
+            dims=("chainage",),
+            coords={
+                "chainage": self._cs,
+            },
+            name="cum_flow_vol",
+        )
+
+    def _get_cum_transport(self):
+        return self._chan.get_cum_transport()
+
+    def get_cum_transport(self):
+        return xr.DataArray(
+            self._get_cum_transport(),
+            dims=("chainage", "rel_grain_sizes", "lith"),
+            coords={
+                "chainage": self._cs,
+                "rel_grain_sizes": self._rgsizes,
+                "lith": list(range(self._nlith)),
+            },
+            name="cum_transport",
+        )
+
+    def _get_cum_total_transport(self):
+        return self._chan.get_cum_transport().sum(axis=(1, 2))
+
+    def get_cum_total_transport(self):
+        return xr.DataArray(
+            self._get_cum_total_transport(),
+            dims=("chainage",),
+            coords={
+                "chainage": self._cs,
+            },
+            name="cum_total_transport",
+        )
+
     def _get_total_transport_rate(self):
-        return np.array([self._chan.get_Qb_jli()[c].sum() for c in self._cidx])
+        return self._chan.get_Qb_jli().sum(axis=(1, 2))
 
     def get_total_transport_rate(self):
         return xr.DataArray(
@@ -88,7 +180,7 @@ class Output:
         )
 
     def _get_transport_rate(self):
-        return np.array([self._chan.get_Qb_jli()[c] for c in self._cidx])
+        return self._chan.get_Qb_jli()
 
     def get_transport_rate(self):
         return xr.DataArray(
@@ -124,9 +216,10 @@ class Output:
             name="min_bed_level",
         )
 
-    def write_step(self, t: dt.datetime):
+    def write_step(self, step: int, t: dt.datetime):
         """Append output for this timestep to netcdf file."""
         self.time = t
+        self.step = step
 
         # Use xarray to make first file
         if not self._initialised:

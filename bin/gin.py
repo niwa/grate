@@ -444,6 +444,13 @@ class OutputOptions(GrateBase):
         | list[
             typing.Literal[
                 "water_level",
+                "flow",
+                "dt",
+                "timestep",
+                "cum_transport",
+                "cum_total_transport",
+                "cum_bed_level_change",
+                "cum_flow_vol",
                 "velocity",
                 "grain_stress",
                 "total_transport_rate",
@@ -509,6 +516,13 @@ class GrateConfig(GrateBase):
         if self.output.variables == "all":
             self.output.variables = [
                 "water_level",
+                "flow",
+                "dt",
+                "timestep",
+                "cum_bed_level_change",
+                "cum_transport",
+                "cum_total_transport",
+                "cum_flow_vol",
                 "velocity",
                 "grain_stress",
                 "total_transport_rate",

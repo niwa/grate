@@ -38,6 +38,7 @@ class Channel:
         nbins = cfg.grain_size_profiles.num_bins
         nlith = cfg.grain_size_profiles.num_lith
         self._Qb_jli = np.empty((len(self._cs), nbins, nlith))
+        self._cum_transport = np.zeros(self._Qb_jli.shape)
         self._grain_shear_velocity = np.empty(len(self._cs))
         self._sand_fraction = np.empty(len(self._cs))
         self._dsm = np.empty(len(self._cs))
@@ -86,6 +87,9 @@ class Channel:
 
     def get_Qb_jli(self):
         return self._Qb_jli
+
+    def get_cum_transport(self):
+        return self._cum_transport
 
     def get_grain_shear_velocity(self):
         return self._grain_shear_velocity
@@ -206,6 +210,7 @@ class Channel:
 
     def set_transport_rates(self):
         self._Qb_jli[:] = self.calc_Qb_jli()
+        self._cum_transport += self._Qb_jli * self._dt
 
     def propogate_sediment(self, t: pd.Timestamp, hydro):
 

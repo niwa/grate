@@ -66,12 +66,12 @@ def run_model(infile: pathlib.Path):
             if do_sediment_transport:
                 chan.set_transport_rates()
                 if step % cfg.output.frequency == 0:
-                    out.write_step(t)
+                    out.write_step(step, t)
                 chan.propogate_sediment(t, hmodel)
             elif step % cfg.output.frequency == 0:
-                out.write_step(t)
+                out.write_step(step, t)
         except Exception:
-            out.write_step(t)
+            out.write_step(step, t)
             sys.stderr.write("Error occured, final state written to output file")
             raise
 
@@ -115,7 +115,7 @@ def run_model(infile: pathlib.Path):
 
     # write a final step even if not on the frequency
     if (step - 1) % cfg.output.frequency != 0:
-        out.write_step(t - dt)
+        out.write_step(step - 1, t - dt)
 
 
 def main():
