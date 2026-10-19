@@ -11,7 +11,6 @@ const WATER_DENSITY: f64 = 1000.0;
 
 pub struct Channel {
     nc: usize,
-    cs: Array1<f64>,                    // (nc, )
 
     // time stepping
     dt: f64,
@@ -19,7 +18,6 @@ pub struct Channel {
     cdt: f64,
     max_dydt: f64,
 
-    poro: f64,                          // porosity
     sand_size: f64,                     // sand grain size in metres in phi units
     morphla: f64,                       // self._cfg.morphological.la
     chi: f64,                           // self._cfg.morphological.chi
@@ -71,7 +69,6 @@ impl Channel {
 
         let mut chan = Self {
             nc: cfg.nc,
-            cs: cfg.cs.clone(),
 
             // time stepping
             dt: cfg.simulation_time.max_dt,
@@ -79,7 +76,6 @@ impl Channel {
             cdt: cfg.simulation_time.cdt,
             max_dydt: 0.1 * cfg.simulation_time.cdt / cfg.simulation_time.max_dt,
 
-            poro: cfg.morphological.poro,
             sand_size: -SAND_SIZE.ln(),
             morphla: cfg.morphological.la,
             chi: cfg.morphological.chi,

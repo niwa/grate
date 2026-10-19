@@ -47,7 +47,11 @@ def run_model(infile: pathlib.Path):
         "quasi_ss": QuasiSteadyModel,
         "dynamic": DynamicWaveModel,
     }[cfg.model.hydro_model_type](cfg, chan)
+    hmodel.initialize(cfg.simulation_time.start)
     print("done", flush=True)
+
+    # using Sf/vel we can get gsv, this allows transport
+    chan.update_gsv(hmodel)
 
     out = Output(cfg, hmodel, chan)
 
@@ -64,10 +68,11 @@ def run_model(infile: pathlib.Path):
         try:
             hmodel.update_water_level(t)
             if do_sediment_transport:
+                chan.update_gsv(hmodel)
                 chan.set_transport_rates()
                 if step % cfg.output.frequency == 0:
                     out.write_step(step, t)
-                chan.propogate_sediment(t, hmodel)
+                chan.propagate_sediment(t)
             elif step % cfg.output.frequency == 0:
                 out.write_step(step, t)
         except Exception:
@@ -107,6 +112,7 @@ def run_model(infile: pathlib.Path):
                 seconds=cfg.simulation_time.max_dt_qs
                 * cfg.morphological.qthres_dtmultiplier
             )
+            chan.set_dt(dt.total_seconds())
             do_sediment_transport = False
         else:
             do_sediment_transport = True

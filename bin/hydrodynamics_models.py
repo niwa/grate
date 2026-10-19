@@ -32,7 +32,7 @@ class HydroDynamicModel:
         self._cum_flow_vol = np.zeros(self._flow.shape)
         self._wl = np.empty(len(self._cs))
 
-        self.initialize(self._cfg.simulation_time.start)
+        # self.initialize(self._cfg.simulation_time.start)
 
     def initialize(self, t: pd.Timestamp):
         """Set water level (elevation above same datum cross-section profile y
@@ -49,7 +49,8 @@ class HydroDynamicModel:
 
         # set cross-section/layer caches except for gsv which we must miss
         # since not sensible hydraulics yet
-        self._channel.set_layer_arrays(self, do_gsv=False)
+        # no need since channel already initialized
+        # self._channel.set_layer_arrays(self, do_gsv=False)
 
         # initialize water level to downstream value shifted by bed
         self._wl[-1] = v
@@ -66,7 +67,9 @@ class HydroDynamicModel:
         # run the first step, this gets our Sf and vel set which allows
         # channel to initialize its variables
         self.update_water_level(t)
-        self._channel.set_layer_arrays(self)
+
+        # set back to zero
+        self._cum_flow_vol = np.zeros(self._flow.shape)
 
     def get_beta(self):
         """Momentum correction factor"""
@@ -226,7 +229,13 @@ class QuasiSteadyModel(HydroDynamicModel):
 
             # print(f"Finished {t=} {i=} {wl=}")
 
-        self._cum_flow_vol += self._flow * self._channel._dt
+        try:
+            self._cum_flow_vol += self._flow * self._channel.get_dt()
+        except:
+            print("flow\n", self._flow)
+            print("cflow\n", self._cum_flow_vol)
+            print("ft\n", self._channel.get_dt())
+            raise
 
         # tell channel that wl is fixed for this iteration so it an store its
         # variables that depend on wl

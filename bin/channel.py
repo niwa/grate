@@ -45,6 +45,12 @@ class Channel:
         self._d90 = np.empty((len(self._cs), 3))
         self._ng = np.empty((len(self._cs), 3))
 
+        self.set_grain_arrays()
+
+        for c in range(self._nc):
+            self._min_bed_level[c] = self._xss[c].min_bed_level
+            self._mean_bed_level[c] = self._xss[c].mean_bed_level
+
     def _init_layer_arrays(self):
         """Grain-size layer state for every chainage point, as arrays with a
         leading chainage axis (acfd, scfd: nc x nbins x nlith).  This does the
@@ -72,6 +78,9 @@ class Channel:
 
     def get_dt(self):
         return self._dt
+
+    def set_dt(self, dt):
+        self._dt = dt
 
     def get_Bwet(self):
         return self._Bwet
@@ -212,7 +221,7 @@ class Channel:
         self._Qb_jli[:] = self.calc_Qb_jli()
         self._cum_transport += self._Qb_jli * self._dt
 
-    def propogate_sediment(self, t: pd.Timestamp, hydro):
+    def propagate_sediment(self, t: pd.Timestamp):
 
         # sediment rates at all chainages, nc x nbins x nlith
         bdy_sed_rate = self._cfg._processed_sediment_boundary.value_at(t)
@@ -241,6 +250,10 @@ class Channel:
         for i, c in enumerate(range(1, self._nc)):
             self._xss[c].aggrade_bed(dy[i])
 
+        for c in range(self._nc):
+            self._min_bed_level[c] = self._xss[c].min_bed_level
+            self._mean_bed_level[c] = self._xss[c].mean_bed_level
+
         # Layer state is one array: update every chainage in a single shot
         self._layers.update_active_layer(
             dy, flux_diff, p, self._cfg.morphological.la, rows=slice(1, None)
@@ -249,9 +262,9 @@ class Channel:
         # FIXME, change storage layer f_jli
 
         # now we can update all the cache variables
-        self.set_layer_arrays(hydro)
+        self.set_grain_arrays()
 
-    def set_layer_arrays(self, hydro, do_gsv: bool = True):
+    def set_grain_arrays(self):
         """don't do gsb on init since Sf and vel wrong so can't calculate gsm"""
 
         lay = self._layers
@@ -263,22 +276,13 @@ class Channel:
         self._d90[:] = np.column_stack([bank, ch, bank])
         self._ng[:] = 0.044 * self._d90 ** (1 / 6)
 
-        if do_gsv:
-            self._grain_shear_velocity[:] = lay.gsv(
-                hydro.get_Sf(), hydro.get_vel(), self._d90[:, 1]
-            )
-        else:
-            self._grain_shear_velocity[:] = 1
         self._sand_fraction[:] = lay.sand_fraction()
         self._dsm[:] = lay.dsm()
 
-        # geometry, still per cross section
-        # FIXME, should just use min
-        for c in range(self._nc):
-            # self._min_bed_level[c] = self._xss[c].calc_min_bed_level()
-            # self._mean_bed_level[c] = self._xss[c].calc_mean_bed_level()
-            self._min_bed_level[c] = self._xss[c].min_bed_level
-            self._mean_bed_level[c] = self._xss[c].mean_bed_level
+    def update_gsv(self, hydro):
+        self._grain_shear_velocity[:] = self._layers.gsv(
+            hydro.get_Sf(), hydro.get_vel(), self._d90[:, 1]
+        )
 
     def set_profile_arrays(self, wl: np.array):
         """Hydrodynamics model has sorted wl, this is to update all the profile

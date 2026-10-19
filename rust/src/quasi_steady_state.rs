@@ -55,6 +55,8 @@ impl QuasiSteadyState {
         self.flow = self.inflow.value_at(t).into_dimensionality::<Ix1>()?;
         self.update_water_level(t, chan)?;
 
+        // set back to zero for proper counting
+        self.cum_flow_vol = Array1::<f64>::zeros(nc);
         Ok(())
     }
 
