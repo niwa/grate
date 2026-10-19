@@ -26,9 +26,9 @@ class Channel:
         self._Bchan = np.array([xs.calc_Bchan() for xs in self._xss])
 
         # these are set each iteration AFTER wl known
-        self._Bwet = np.empty(len(self._cs))
         self._min_bed_level = np.empty(len(self._cs))
         self._mean_bed_level = np.empty(len(self._cs))
+        self._Bwet = np.empty(len(self._cs))
         self._area = np.empty((len(self._cs), 3))
         self._P = np.empty((len(self._cs), 3))
         self._nf = np.empty((len(self._cs), 3))
@@ -179,9 +179,9 @@ class Channel:
         """Return deepest part of the cross-section"""
         return self._min_bed_level
 
-    def calc_area(self, c: int, wl: float, loc: Loc):
+    def calc_area(self, c: int, wl: float):
         """Return area of water between bed and wl"""
-        return self._xss[c].calc_area(wl, loc)
+        return self._xss[c].calc_area(wl)
 
     def calc_Qb_jli(self):
         """Return bed material transport rate for ALL chainages
@@ -273,9 +273,12 @@ class Channel:
         self._dsm[:] = lay.dsm()
 
         # geometry, still per cross section
+        # FIXME, should just use min
         for c in range(self._nc):
-            self._min_bed_level[c] = self._xss[c].calc_min_bed_level()
-            self._mean_bed_level[c] = self._xss[c].calc_mean_bed_level()
+            # self._min_bed_level[c] = self._xss[c].calc_min_bed_level()
+            # self._mean_bed_level[c] = self._xss[c].calc_mean_bed_level()
+            self._min_bed_level[c] = self._xss[c].min_bed_level
+            self._mean_bed_level[c] = self._xss[c].mean_bed_level
 
     def set_profile_arrays(self, wl: np.array):
         """Hydrodynamics model has sorted wl, this is to update all the profile
@@ -283,10 +286,9 @@ class Channel:
 
         for c, w in zip(range(self._nc), wl):
             self._Bwet[c] = self._xss[c].calc_Bwet(w)
-            for j, loc in enumerate((Loc.LEFT, Loc.CHANNEL, Loc.RIGHT)):
-                self._area[c, j] = self.calc_area(c, w, loc)
-                self._P[c, j] = self._xss[c].calc_P(w, loc)
-                self._nf[c, j] = self._xss[c].calc_nf(w, loc)
+            self._area[c] = self.calc_area(c, w)
+            self._P[c] = self._xss[c].calc_P(w)
+            self._nf[c] = self._xss[c].calc_nf(w)
             # self._conveyance[c] = self._xss[c].calc_conveyance(
             #     self._area[c], self._P[c], self._nf[c], self._ng[c]
             # )

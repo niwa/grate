@@ -93,7 +93,7 @@ class HydroDynamicModel:
 
     def _calc_vel(self, c: int, wl: float):
         """The mean velocity, ie Q/A at current step"""
-        return self._flow[c] / self._channel.calc_area(c, wl, Loc.ALL)
+        return self._flow[c] / self._channel.calc_area(c, wl).sum()
 
     def _calc_Sf(self, c: int, wl: float):
         """Return friction slope, ie. Q abs(Q) / K^2"""

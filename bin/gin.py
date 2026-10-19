@@ -236,6 +236,9 @@ class RuntimeInflowBoundary:
             columns=cs,
         )
 
+    def get_df(self):
+        return (self.__const, self.__flows)
+
 
 @dataclass
 class RuntimeDownstreamBoundary:
@@ -405,6 +408,9 @@ class RuntimeSedimentBoundaries:
 
         self.ordinates = cs
         self.__values = result
+
+    def get_np(self):
+        return (self.__times, self.__values)
 
 
 class SedimentExtraction(GrateBase):

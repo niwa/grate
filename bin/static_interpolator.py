@@ -14,6 +14,7 @@ class StaticInterpolator:
         # come from the profile y values.  sort them and add on one big one on
         # the end.
         self.xs = np.array(sorted(yvals) + [max_depth])
+        self.xs = np.unique(self.xs)
         self.fs = np.array([f(x) for x in self.xs])
         self.xmin, self.xmax = self.xs.min(), self.xs.max()
 
@@ -23,3 +24,6 @@ class StaticInterpolator:
 
         assert self.xmin <= x <= self.xmax, f"{self.xmin} {x} {self.xmax}"
         return np.interp(x, self.xs, self.fs)
+
+    def get_np(self):
+        return np.stack([self.xs, self.fs], axis=1)

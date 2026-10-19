@@ -2,7 +2,6 @@ import math
 import numpy as np
 import pandas as pd
 from enum import Enum
-from functools import lru_cache
 from gin import CrossSectionProfile
 from static_interpolator import StaticInterpolator
 
@@ -327,49 +326,75 @@ class CrossSection:
         return self.channel[-1, 0] - self.channel[0, 0]
 
     def calc_Bwet(self, wl: float):
-        """Return water surface width for given water level."""
-        ret = 0
-        for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT):
-            interp = self._Bwet_interpolator[loc]
-            if interp is not None:
-                ret += interp.eval(
-                    wl - self.min_bed_level if loc is Loc.CHANNEL else wl
-                )
-        return ret
+        """Return water surface width for given water level.
+
+        Returns
+        -------
+        float
+            The sum of Bwet over left, channel, right
+        """
+
+        le = self._Bwet_interpolator[Loc.LEFT]
+        ch = self._Bwet_interpolator[Loc.CHANNEL]
+        ri = self._Bwet_interpolator[Loc.RIGHT]
+        return np.array(
+            [
+                le.eval(wl) if le else 0,
+                ch.eval(wl - self.min_bed_level) if ch else 0,
+                ri.eval(wl) if ri else 0,
+            ]
+        ).sum()
 
     def _Bwet(self, wl: float, loc: Loc):
         """Return water surface width for given water level."""
         return sum(w for _, _, w, _ in self._wetted_segments(wl, loc))
 
-    def calc_area(self, wl: float, loc: Loc):
-        """Area of water below this water level and above min_bed_level."""
-        if loc == Loc.ALL:
-            return sum(
-                self.calc_area(wl, loc) for loc in (Loc.LEFT, Loc.CHANNEL, Loc.RIGHT)
-            )
+    def calc_area(self, wl: float):
+        """Area of water below this water level and above min_bed_level.
 
-        interp = self._area_interpolator[loc]
-        if interp is None:
-            return 0.0
-
-        return interp.eval(wl - self.min_bed_level if loc is Loc.CHANNEL else wl)
+        Returns
+        -------
+        np.array
+            [area in left, area in channel, area in right]
+        """
+        le = self._area_interpolator[Loc.LEFT]
+        ch = self._area_interpolator[Loc.CHANNEL]
+        ri = self._area_interpolator[Loc.RIGHT]
+        return np.array(
+            [
+                le.eval(wl) if le else 0,
+                ch.eval(wl - self.min_bed_level) if ch else 0,
+                ri.eval(wl) if ri else 0,
+            ]
+        )
 
     def _area(self, wl: float, loc: Loc):
         return sum(a for _, _, _, a in self._wetted_segments(wl, loc))
 
-    def calc_P(self, wl: float, loc: Loc):
-        """Wetted perimeter for given water level."""
+    def calc_P(self, wl: float):
+        """Wetted perimeter for given water level.
 
-        interp = self._P_interpolator[loc]
-        if interp is None:
-            return 0.0
-        return interp.eval(wl - self.min_bed_level if loc is Loc.CHANNEL else wl)
+        Returns
+        -------
+        np.array
+            [P in left, P in channel, P in right]
+        """
+        le = self._P_interpolator[Loc.LEFT]
+        ch = self._P_interpolator[Loc.CHANNEL]
+        ri = self._P_interpolator[Loc.RIGHT]
+        return np.array(
+            [
+                le.eval(wl) if le else 0,
+                ch.eval(wl - self.min_bed_level) if ch else 0,
+                ri.eval(wl) if ri else 0,
+            ]
+        )
 
     def _P(self, wl: float, loc: Loc):
         """Wetted perimeter for given water level."""
         return sum(p for _, p, _, _ in self._wetted_segments(wl, loc))
 
-    def calc_nf(self, wl: float, loc: Loc):
+    def calc_nf(self, wl: float):
         """Return form roughness for the wetted cross-section.
 
         formrf * sum_k (r_k * p_k) / P
@@ -378,11 +403,21 @@ class CrossSection:
         rk and pk are relative roughness and wetted perimeter
         P is the wetted perimeter
 
+        Returns
+        -------
+        np.array
+            [nf in left, nf in channel, nf in right]
         """
-        interp = self._nf_interpolator[loc]
-        if interp is None:
-            return 0.0
-        return interp.eval(wl - self.min_bed_level if loc is Loc.CHANNEL else wl)
+        le = self._nf_interpolator[Loc.LEFT]
+        ch = self._nf_interpolator[Loc.CHANNEL]
+        ri = self._nf_interpolator[Loc.RIGHT]
+        return np.array(
+            [
+                le.eval(wl) if le else 0,
+                ch.eval(wl - self.min_bed_level) if ch else 0,
+                ri.eval(wl) if ri else 0,
+            ]
+        )
 
     def _nf(self, wl: float, loc: Loc):
         """Return form roughness for the wetted cross-section.
@@ -427,7 +462,7 @@ class CrossSection:
         assert K > 0, "No water"
         return K
 
-    def calc_conveyance_using_wl(self, wl: float, ng_array):
+    def calc_conveyance_using_wl(self, wl: float, ng):
         """K conveyance
 
         sum over left, main, right of
@@ -438,23 +473,20 @@ class CrossSection:
             R is A/P
             ng is grain roughness
             nf is form roughness
+
+        Parameters
+        ----------
+        wl: float
+            Water level
+
+        ng: np.array
+            grain roughness in left, channel, right
+
         """
-        K = 0
-        for loc, ng in zip((Loc.LEFT, Loc.CHANNEL, Loc.RIGHT), ng_array):
-            A = self.calc_area(wl, loc)
-            P = self.calc_P(wl, loc)
-            if P == 0:
-                # no water in this part of channel
-                continue
-            R = A / P
-            K += A * R ** (2 / 3) / (ng + self.calc_nf(wl, loc))
-
-        if K <= 0:
-            raise ValueError(
-                f"No water {K=} {wl=} {ng_array=} {self.left=} {self.channel=} {self.right=}"
-            )
-
-        return K
+        A = self.calc_area(wl)
+        P = self.calc_P(wl)
+        nf = self.calc_nf(wl)
+        return self.calc_conveyance(A, P, nf, ng)
 
     # def R(self, wl: float):
     #     """Hydraulic radius A/P over entire xsection"""

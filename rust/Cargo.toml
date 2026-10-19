@@ -1,0 +1,15 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4", features = ["derive"] }
+saphyr = "0.2"
+ndarray = { version = "0.17.2", features = ["rayon"] }
+ndarray-npy = { version = "0.10.0", features = ["npz"] }
+chrono = "0.4.45"
+rootseek = "1.0.3"
+csv = "1.4.0"
+lambert_w = "2.0.5"

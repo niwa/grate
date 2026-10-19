@@ -21,6 +21,7 @@ from gin import GrateConfig
 from simulate import run_model
 from utils import positive_float
 from movie import make_movie
+from prep import prep_model
 
 # parse command line
 p = argparse.ArgumentParser(
@@ -61,6 +62,10 @@ validate.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
 runmode = sub.add_parser("run", help="Run yaml model")
 runmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
 
+prepmode = sub.add_parser("prep", help="Prep yaml model to grater")
+prepmode.add_argument("yaml", type=pathlib.Path, help="Input yaml file")
+prepmode.add_argument("odir", type=pathlib.Path, help="Output folder")
+
 moviemode = sub.add_parser("movie", help="Make movie for xarray NetCDF variable")
 moviemode.add_argument("inf", type=pathlib.Path, help="Input NetCDF")
 moviemode.add_argument("var", help="Variable to plot, eg depth")
@@ -97,6 +102,10 @@ match args.command:
     case "validate":
         with open(args.yaml) as f:
             cfg = GrateConfig.model_validate(yaml.safe_load(f))
+
+    case "prep":
+        print(f"Prepping {args.yaml}")
+        prep_model(args.yaml, args.odir)
 
     case "run":
         updates.version_check()
