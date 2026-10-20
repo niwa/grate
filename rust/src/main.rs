@@ -6,7 +6,9 @@ use anyhow::Result;
 use config::Config;
 use quasi_steady_state::QuasiSteadyState;
 use channel::Channel;
+use output::Output;
 
+mod output;
 mod channel;
 mod quasi_steady_state;
 mod config;
@@ -25,8 +27,6 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let mut cfg = Config::load(&cli.idir)?;
 
-    // put out stuff that is going into hmodel and channel
-
     // make the channel, this gets everything set (including ng) but no gsv (since that needs
     // Sf/vel).  having ng is necessary for conveyance
     let mut channel = Channel::new(&mut cfg);
@@ -38,9 +38,9 @@ fn main() -> Result<()> {
     // using Sf/vel we can get gsv, this allows transport
     channel.update_gsv(hmodel.get_sf(), hmodel.get_vel())?;
 
-    // out = Output(cfg, hmodel, chan)
+    let mut out = Output::new(&cfg, &channel)?;
 
-    let mut do_sediment_transport: bool = true;
+    let mut do_sediment_transport: bool;
     let start: f64 = cfg.simulation_time.start;
     let end: f64 = cfg.simulation_time.end;
     let sim_total_seconds: f64 = end - start;
@@ -52,17 +52,25 @@ fn main() -> Result<()> {
     while t <= end {
         hmodel.update_water_level(t, &channel)?;
 
+        // if above qthres increase dt and don't do sediment transport
+        if hmodel.get_flow()[cfg.nc-1] < cfg.morphological.qthres {
+            channel.set_dt(channel.max_dt * cfg.morphological.qthres_dtmultiplier);
+            do_sediment_transport = false;
+        } else {
+            do_sediment_transport = true;
+        }
+
         if do_sediment_transport {
             // set the gsv using Sf/vel from hydro, which allows transport
             channel.update_gsv(hmodel.get_sf(), hmodel.get_vel())?;
             channel.set_transport_rates(hmodel.get_wl());
-            if step % cfg.output.frequency == 0 {
-            //    out.write_step(step, t);
-            }
+        }
+        if step % cfg.output.frequency == 0 {
+           out.write_step(step, t, &hmodel, &channel)?;
+        }
+        if do_sediment_transport {
             // this updates bed_level and acfd, and sets d90 etc, but not gsv
             channel.propagate_sediment(t);
-        } else if step % cfg.output.frequency == 0 {
-            // out.write_step(step, t)
         }
 
         if step > 1 && step % 10 == 0 {
@@ -80,15 +88,6 @@ fn main() -> Result<()> {
             std::io::stdout().flush()?;
         }
 
-        // if above qthres increase dt and don't do sediment transport
-        if hmodel.get_flow()[cfg.nc-1] < cfg.morphological.qthres {
-            // FIXME
-            // channel.set_dt(channel.max_dt * cfg.morphological.qthres_dtmultiplier);
-            // do_sediment_transport = false;
-        } else {
-            do_sediment_transport = true;
-        }
-
         dt = channel.get_dt();
         t += dt;
         step += 1;
@@ -100,8 +99,10 @@ fn main() -> Result<()> {
 
     // write a final step even if not on the frequency
     if (step - 1) % cfg.output.frequency != 0 {
-        // out.write_step(step - 1, t - dt);
+        out.write_step(step - 1, t - dt, &hmodel, &channel)?;
     }
+    
+    out.sync()?;
 
     Ok(())
 }

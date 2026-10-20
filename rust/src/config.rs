@@ -21,6 +21,7 @@ pub struct Config {
     pub mean_bed_level: Array1<f64>,                // (nc,)
     pub bankd90: Array1<f64>,                       // (nc,)
     pub rgsizes: Array1<f64>,                       // (nbins,)
+    pub uppersizes: Array1<f64>,                    // (nbins,)
     pub sediment_densities: Array1<f64>,            // (nlith,)
     pub sediment: Option<InterpArray>,              // time, (nc, nbins, nlith), option so channel can take
     pub inflow: Option<InterpArray>,                // time, (nc, ), flow, option so hmodel can take
@@ -146,6 +147,7 @@ impl Config {
                 mean_bed_level: read_array1(&mut profiles, "mean_bed_level"),
                 bankd90: read_array1(&mut grain, "bankd90"),
                 rgsizes: read_array1(&mut grain, "rgsizes"),
+                uppersizes: read_array1(&mut grain, "uppersizes"),
                 sediment_densities: read_array1(&mut grain, "sediment_densities"),
                 sediment: Some(InterpArray::new(&config_path(dir, "sediment.npz"))?),
                 inflow: Some(InterpArray::new(&config_path(dir, "inflow.npz"))?),

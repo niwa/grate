@@ -60,11 +60,6 @@ impl QuasiSteadyState {
         Ok(())
     }
 
-    // fn set_flow(&mut self, t: f64) -> Result<()> {
-    //     self.flow = self.inflow.value_at(t).into_dimensionality::<Ix1>()?;
-    //     Ok(())
-    // }
-
     fn calc_ds_wl(&self, t: f64, chan: &Channel) -> Result<f64> {
         let c = self.nc - 1;
         let bed = chan.get_min_bed_level()[c];
@@ -92,9 +87,9 @@ impl QuasiSteadyState {
         &self.flow
     }
 
-    // pub fn get_cum_flow_vol(&self) -> &Array1<f64> {
-    //     &self.cum_flow_vol
-    // }
+    pub fn get_cum_flow_vol(&self) -> &Array1<f64> {
+        &self.cum_flow_vol
+    }
 
     pub fn get_sf(&self) -> &Array1<f64> {
         &self.sf

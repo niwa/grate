@@ -31,7 +31,7 @@ pub struct Channel {
 
     // grain info
     rgsizes: Array1<f64>,               // (nbins, )
-    phi: Array1<f64>,                   // (bbins, ) grain size in phi units, used for percentiles
+    phi: Array1<f64>,                   // (nbins, ) grain upper size in phi units, used for percentiles
     sand_fraction: Array1<f64>,         // (nc, ) how much sand in this chainage
     dsm: Array1<f64>,                   // (nc, ) median of grain size in channel
     d90_channel: Array1<f64>,           // (nc, ) 90 percentile grain size in channel
@@ -88,7 +88,7 @@ impl Channel {
             ng: Array2::<f64>::zeros((cfg.nc, 3)),              // (nc, 3)
                 
             rgsizes: cfg.rgsizes.clone(),
-            phi: cfg.rgsizes.map(|x| -x.ln()),
+            phi: cfg.uppersizes.map(|x| -x.ln()),
             sand_fraction: Array1::<f64>::zeros(cfg.nc),
             dsm: Array1::<f64>::ones(cfg.nc),
             d90: Array2::<f64>::ones((cfg.nc, 3)),
@@ -134,6 +134,18 @@ impl Channel {
 
     pub fn get_dt(&self) -> f64 {
         self.dt
+    }
+
+    pub fn get_cum_transport(&self) -> &Array3<f64> {
+        &self.cum_transport
+    }
+
+    pub fn get_gsv(&self) -> &Array1<f64> {
+        &self.gsv
+    }
+
+    pub fn get_trans_rate_jli(&self) -> &Array3<f64> {
+        &self.trans_rate_jli
     }
 
     pub fn calc_area(&self, c: usize, wl: f64) -> Array1<f64> {

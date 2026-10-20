@@ -42,6 +42,38 @@ def get_representative_grain_sizes(cfds: list[list]):
     )
 
 
+def get_grain_size_bin_uppers(cfds: list[list]):
+    """Return the upper limit of each bin for grain sizes
+
+    NB: The first grain size profile line is not considered a bin, it is the
+    lower limit.  For some reason the old grate didn't like dealing with a bin
+    with an explicit zero lower limit.  So considered the first bin as a
+    combination of the first and second: it has a representative size of the
+    second bin, but no where does it bother with the lower limit
+
+    Parameters
+    ----------
+    cfds: list[list]
+        len of cfds if number of bins + 1, each element has number of
+        profiles + 1 elements.  Suppose there are n bins with boundaries
+        [b0, b1), [b1, b2), ... [bn-1, bn)
+        and m profiles then we have something like:
+
+        b0  cumfreq10 cumfreq20 ... cumfreqm0
+        b1  cumfreq11 cumfreq21 ... cumfreqm1
+
+        bn  cumfreq1n cumfreq2n ... cumfreqmn
+
+    Returns
+    -------
+    np.array
+        The upper limit of all but the first bin, ie
+        b1, b2, up to bn
+    """
+    # get first column, the sizes from cfds.
+    return np.array([i[0] for i in cfds[1:]])  # ignore first 'bin'
+
+
 def get_grain_props(pid: int, cfds: list[list], lithtab: list[list]):
     """Return the fractions ie proportions for given profile index.
 

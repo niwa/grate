@@ -17,7 +17,11 @@ is an extra leading chainage axis.
 import numpy as np
 import scipy.special
 
-from grainprofile import get_grain_props, get_representative_grain_sizes
+from grainprofile import (
+    get_grain_props,
+    get_representative_grain_sizes,
+    get_grain_size_bin_uppers,
+)
 
 KAPPA = 0.4  # Von Karman's constant
 GRAVITY = 9.81
@@ -87,16 +91,17 @@ def resolve_interp(xp, fp):
 
 
 class LayerArrays:
-    def __init__(self, acfd, scfd, rgsizes, sed_dens, chi):
+    def __init__(self, acfd, scfd, rgsizes, uppersizes, sed_dens, chi):
         self.acfd = np.asarray(acfd, dtype=float)  # (nc, nbins, nlith)
         self.scfd = np.asarray(scfd, dtype=float)  # (nc, nbins, nlith)
         self.rgsizes = np.asarray(rgsizes, dtype=float)  # (nbins,)
+        self.uppersizes = np.asarray(uppersizes, dtype=float)  # (nbins,)
         self.sediment_densities = np.asarray(sed_dens, dtype=float)  # (nprofiles,)
         self.chi = chi
         self.nc, self.nbins, self.nlith = self.acfd.shape
 
-        # grain size in "phi" units, used for percentiles
-        self._phi = -np.log(self.rgsizes)
+        # upper grain size in "phi" units, used for percentiles
+        self._phi = -np.log(self.uppersizes)
 
     @classmethod
     def from_config(cls, cfg, chainpts):
@@ -131,6 +136,7 @@ class LayerArrays:
             props("storage_layer_group"),
             chainpts,
             get_representative_grain_sizes(gs.grain_size_cfds),
+            get_grain_size_bin_uppers(gs.grain_size_cfds),
             np.array(gs.sediment_densities),
             cfg.morphological.chi,
         )
@@ -143,6 +149,7 @@ class LayerArrays:
         scfd_p,
         chainpts,
         rgsizes,
+        uppersizes,
         sediment_densities,
         chi,
     ):
@@ -158,6 +165,7 @@ class LayerArrays:
             interp_rows(profile_chainage, acfd_p, chainpts),
             interp_rows(profile_chainage, scfd_p, chainpts),
             rgsizes,
+            uppersizes,
             sediment_densities,
             chi,
         )

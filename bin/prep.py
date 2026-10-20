@@ -123,6 +123,7 @@ def prep_model(infile: pathlib.Path, odir: pathlib.Path):
         acfd=chan._layers.acfd,  # (nc, nbins, nlith)
         scfd=chan._layers.scfd,  # (nc, nbins, nlith)
         rgsizes=chan._layers.rgsizes,  # (nbins, )
+        uppersizes=chan._layers.uppersizes,  # (nbins, )
         sediment_densities=chan._layers.sediment_densities,  # (nprofiles,)
         bankd90=chan._bankd90,  # (nc, ) where nan use channel d90
     )

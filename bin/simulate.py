@@ -67,14 +67,26 @@ def run_model(infile: pathlib.Path):
     while t <= end:
         try:
             hmodel.update_water_level(t)
+
+            # if above qthres increase dt and don't do sediment transport
+            if hmodel.get_flow()[-1] < cfg.morphological.qthres:
+                chan.set_dt(
+                    pd.Timedelta(
+                        seconds=cfg.simulation_time.max_dt_qs
+                        * cfg.morphological.qthres_dtmultiplier
+                    ).total_seconds()
+                )
+                do_sediment_transport = False
+            else:
+                do_sediment_transport = True
+
             if do_sediment_transport:
                 chan.update_gsv(hmodel)
                 chan.set_transport_rates()
-                if step % cfg.output.frequency == 0:
-                    out.write_step(step, t)
-                chan.propagate_sediment(t)
-            elif step % cfg.output.frequency == 0:
+            if step % cfg.output.frequency == 0:
                 out.write_step(step, t)
+            if do_sediment_transport:
+                chan.propagate_sediment(t)
         except Exception:
             out.write_step(step, t)
             sys.stderr.write("Error occured, final state written to output file")
@@ -105,17 +117,6 @@ def run_model(infile: pathlib.Path):
         step += 1
         dt = pd.Timedelta(seconds=chan.get_dt())
         t += dt
-
-        # if above qthres increase dt and don't do sediment transport
-        if hmodel.get_flow()[-1] < cfg.morphological.qthres:
-            dt = pd.Timedelta(
-                seconds=cfg.simulation_time.max_dt_qs
-                * cfg.morphological.qthres_dtmultiplier
-            )
-            chan.set_dt(dt.total_seconds())
-            do_sediment_transport = False
-        else:
-            do_sediment_transport = True
 
     print()
 
