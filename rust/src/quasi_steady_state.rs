@@ -119,6 +119,10 @@ impl QuasiSteadyState {
     }
 
     pub fn update_water_level(&mut self, t: f64, chan: &Channel) -> Result<()> {
+
+        // FIXME
+        // println!("Update water level at t={t}");
+
         self.flow = self.inflow.value_at(t).into_dimensionality::<Ix1>()?;
         self.wl[self.nc - 1] = self.calc_ds_wl(t, chan)?;
 
@@ -165,6 +169,13 @@ impl QuasiSteadyState {
             self.sf[i] = self.calc_sf(i, wl, chan);
             self.vel[i] = self.calc_vel(i, wl, chan);
         }
+        // FIXME
+        // println!("Water level at t={t}\nwl={:?}\nSf={:?}", self.wl, self.sf);
+        // let wlfoo = 0.43172180567252344;
+        // println!("wl={wlfoo}\nK={}\nA={}\nP={}\nnf={}", chan.calc_conveyance(44, wlfoo), chan.calc_area(44, wlfoo), chan.calc_p(44, wlfoo), chan.calc_nf(44, wlfoo));
+        // let wlfoo = 0.43;
+        // println!("wl={wlfoo}\nK={}\nA={}\nP={}\nnf={}", chan.calc_conveyance(44, wlfoo), chan.calc_area(44, wlfoo), chan.calc_p(44, wlfoo), chan.calc_nf(44, wlfoo));
+
 
         self.cum_flow_vol += &(&self.flow * chan.get_dt());
 

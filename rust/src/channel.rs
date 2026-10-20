@@ -1,6 +1,6 @@
 use anyhow::Result;
 use lambert_w::lambert_w0;
-use ndarray::{ArrayView1, Zip, Axis, Array1, Array2, Array3, Ix3};
+use ndarray::{ArrayView1, Zip, Axis, Array1, Array2, Array3, Ix3, s};
 use crate::config::{Config, CrossSectionTab};
 use crate::interp_array::InterpArray;
 
@@ -152,34 +152,50 @@ impl Channel {
         let tab = &self.area_tab[c];
         let d = wl - self.min_bed_level[c];
         Array1::from_vec(vec![
-            tab.0.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
+            tab.0.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
             tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
-            tab.2.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
+            tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
         ])
     }
 
     pub fn calc_bwet(&self, c: usize, wl: f64) -> f64 {
         let tab = &self.bwet_tab[c];
+        let d = wl - self.min_bed_level[c];
         return 
             tab.0.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]) +
-            tab.1.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]) +
+            tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]) +
             tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]);
     }
 
+    // FIXME
+    // pub fn calc_bwet_debug(&self, c: usize, wl: f64) -> f64 {
+    //     let tab = &self.bwet_tab[c];
+    //     let d = wl - self.min_bed_level[c];
+    //     println!("{}", tab.0.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]));
+    //     println!("{}", tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]));
+    //     println!("{}", tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]));
+    //     return 
+    //         tab.0.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]) +
+    //         tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]) +
+    //         tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]);
+    // }
+
     fn calc_p(&self, c: usize, wl: f64) -> Array1<f64> {
         let tab = &self.p_tab[c];
+        let d = wl - self.min_bed_level[c];
         Array1::from_vec(vec![
             tab.0.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
-            tab.1.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
+            tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
             tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
         ])
     }
 
     fn calc_nf(&self, c: usize, wl: f64) -> Array1<f64> {
         let tab = &self.nf_tab[c];
+        let d = wl - self.min_bed_level[c];
         Array1::from_vec(vec![
             tab.0.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
-            tab.1.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
+            tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
             tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]),
         ])
     }
@@ -189,6 +205,7 @@ impl Channel {
         let p = self.calc_p(c, wl);
         let nf = self.calc_nf(c, wl);
 
+        // FIXME
         // println!("c={} wl={} a={:?}, p={:?}, nf={:?}", c, wl, a, p, nf);
 
         let k: f64 = (0..3)
@@ -257,6 +274,12 @@ impl Channel {
         // update trans_rate_jli with qb_jli
         self.qb_jli();
 
+        // FIXME
+        // println!("qb_jli at 1259\n{:?}", self.trans_rate_jli.slice(s![1259, .., ..]));
+        // println!("bwet at 1259\n{:?}", self.calc_bwet(1259, wl[1259]));
+        // self.calc_bwet_debug(1259, wl[1259]);
+        // println!("wl at 1259\n{:?}", wl[1259]);
+
         // now multiply by bwet
         for c in 0..self.nc {
             let bwet = self.calc_bwet(c, wl[c]);
@@ -265,8 +288,11 @@ impl Channel {
                 .mapv_inplace(|q| q * bwet);
         }
 
+
         // the cumulative transport rate
         self.cum_transport.scaled_add(self.dt, &self.trans_rate_jli);
+        // FIXME
+        // println!("Updating cum trans {}", self.cum_transport.sum());
     }
 
     // Wilcock & Crowe (2003) eq 9.33 for every chainage at once.
@@ -278,6 +304,10 @@ impl Channel {
         let nlith = self.sediment_densities.len();
 
         let s = &self.sediment_densities / WATER_DENSITY;   // (nlith, )
+
+        // FIXME
+        // println!("\ngsv={:?}\nFs={:?}\ndsm={:?}", self.gsv, self.sand_fraction, self.dsm);
+
 
         for c in 0..nc {
             let phirm = 0.021 + 0.015 * (-20.0 * self.sand_fraction[c]).exp();
@@ -393,45 +423,31 @@ fn cumf_lith(arr: &Array3<f64>) -> Array2<f64> {
     return cumf;
 }
 
-// fn cumf_smaller_than(x: f64, xs: &Array1<f64>, arr: &Array2<f64>) -> Array1<f64> {
-//     let pos = xs.iter().position(|&v| v >= x);
-//
-//     let Some(pos) = pos else {
-//         return arr.column(xs.len() - 1).to_owned();
-//     };
-//
-//     if pos == 0 {
-//         return arr.column(0).to_owned();
-//     }
-//
-//     if xs[pos] == x {
-//         return arr.column(pos).to_owned();
-//     }
-//
-//     let fraction = (x - xs[pos - 1]) / (xs[pos] - xs[pos - 1]);
-//     &arr.column(pos - 1) + &((&arr.column(pos) - &arr.column(pos - 1)) * fraction)
-// }
-
-/// Find x in xs and interpolate between two columns of 2d array for every row in arr
+/// Find x in xs and interpolate between two columns of arr for every row.
+/// xs may be sorted ascending or descending.
 fn cumf_smaller_than(x: f64, xs: &Array1<f64>, arr: &Array2<f64>, out: &mut Array1<f64>) {
     let n = xs.len();
+    let asc = xs[0] < xs[n - 1];
 
-    if x <= xs[0] {
+    if (asc && x <= xs[0]) || (!asc && x >= xs[0]) {
         for c in 0..arr.nrows() {
             out[c] = arr[[c, 0]];
         }
         return;
-    } else if x >= xs[n-1] {
+    }
+
+    if (asc && x >= xs[n - 1]) || (!asc && x <= xs[n - 1]) {
         for c in 0..arr.nrows() {
-            out[c] = arr[[c, n-1]];
+            out[c] = arr[[c, n - 1]];
         }
         return;
     }
 
-    let pos = partition_point(xs.view(), x);
-    let fraction = (x - xs[pos-1]) / (xs[pos] - xs[pos-1]);
+    let pos = partition_point(xs.view(), x, asc);
+    let fraction = (x - xs[pos - 1]) / (xs[pos] - xs[pos - 1]);
+
     for c in 0..arr.nrows() {
-        let v0 = arr[[c, pos-1]];
+        let v0 = arr[[c, pos - 1]];
         let v1 = arr[[c, pos]];
         out[c] = v0 + (v1 - v0) * fraction;
     }
@@ -454,7 +470,7 @@ fn percentile(x: f64, cf: &Array2<f64>, ys: &Array1<f64>, out: &mut Array1<f64>)
             ys[0]
         } else {
             // j is index of first value > x, minus 1
-            let j = partition_point(row, x) - 1;
+            let j = partition_point(row, x, true) - 1;
 
             let c0 = row[j];
             let c1 = row[j + 1];
@@ -469,12 +485,14 @@ fn percentile(x: f64, cf: &Array2<f64>, ys: &Array1<f64>, out: &mut Array1<f64>)
 }
 
 /// First value > x in sorted row, or len(row) if there isn't one
-fn partition_point(row: ArrayView1<f64>, x: f64) -> usize {
+/// If asc assume row is ascending sorted so need <= compare, otherwise
+/// >= compare
+fn partition_point(row: ArrayView1<f64>, x: f64, asc: bool) -> usize {
     let (mut lo, mut hi) = (0, row.len());
 
     while lo < hi {
         let mid = lo + (hi - lo) / 2;
-        if row[mid] <= x {
+        if (asc && row[mid] <= x) || (!asc && row[mid] >= x) {
             lo = mid + 1;
         } else {
             hi = mid;
@@ -532,6 +550,18 @@ mod tests {
 
         cumf_smaller_than(5.0, &xs, &arr, &mut out);
         assert_eq!(out, array![11.0, 40.0]);
+
+        // try descending
+        let arr = array![
+            [11.0, 9.0, 7.0],
+            [40.0, 30.0, 26.0]
+        ];
+        let xs = array![4.0, 2.0, 1.0];
+        cumf_smaller_than(3.0, &xs, &arr, &mut out);
+        assert_eq!(out, array![10.0, 35.0]);
+
+        cumf_smaller_than(5.0, &xs, &arr, &mut out);
+        assert_eq!(out, array![11.0, 40.0]);
     }
 
     #[test]
@@ -556,24 +586,27 @@ mod tests {
     #[test]
     fn test_partition_point() {
         let a = array![1.0, 2.0, 3.0, 4.0, 5.0];
-        let p = partition_point(a.view(), -1.0);
+        let p = partition_point(a.view(), -1.0, true);
         assert_eq!(p, 0);
-        let p = partition_point(a.view(), 0.0);
+        let p = partition_point(a.view(), 0.0, true);
         assert_eq!(p, 0);
-        let p = partition_point(a.view(), 0.5);
+        let p = partition_point(a.view(), 0.5, true);
         assert_eq!(p, 0);
-        let p = partition_point(a.view(), 1.0);
+        let p = partition_point(a.view(), 1.0, true);
         assert_eq!(p, 1);
-        let p = partition_point(a.view(), 2.0);
+        let p = partition_point(a.view(), 2.0, true);
         assert_eq!(p, 2);
-        let p = partition_point(a.view(), 3.0);
+        let p = partition_point(a.view(), 3.0, true);
         assert_eq!(p, 3);
-        let p = partition_point(a.view(), 4.0);
+        let p = partition_point(a.view(), 4.0, true);
         assert_eq!(p, 4);
-        let p = partition_point(a.view(), 5.0);
+        let p = partition_point(a.view(), 5.0, true);
         assert_eq!(p, 5);
-        let p = partition_point(a.view(), 6.0);
+        let p = partition_point(a.view(), 6.0, true);
         assert_eq!(p, 5);
+        let a = array![5.0, 4.0, 3.0, 2.0, 1.0];
+        let p = partition_point(a.view(), 2.0, false);
+        assert_eq!(p, 4);
     }
 }
 

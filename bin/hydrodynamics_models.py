@@ -177,6 +177,8 @@ class QuasiSteadyModel(HydroDynamicModel):
             Timestep
         """
 
+        # print(f"Update water level at {t}")
+
         # get the most downstream water level
         self._wl[-1] = self._calc_ds_wl(t)
 
@@ -227,8 +229,6 @@ class QuasiSteadyModel(HydroDynamicModel):
             self._Sf[i] = self._calc_Sf(i, wl)
             self._vel[i] = self._calc_vel(i, wl)
 
-            # print(f"Finished {t=} {i=} {wl=}")
-
         try:
             self._cum_flow_vol += self._flow * self._channel.get_dt()
         except:
@@ -236,6 +236,17 @@ class QuasiSteadyModel(HydroDynamicModel):
             print("cflow\n", self._cum_flow_vol)
             print("ft\n", self._channel.get_dt())
             raise
+
+        # print(f"Update water level at {t}\nwl={self._wl}\nSf={self._Sf}")
+        #
+        # wlfoo = 0.43172180567252344
+        # print(
+        #     f"wl={wlfoo}\nK={self._channel.calc_conveyance(44, wlfoo)}\nA={self._channel.calc_area(44, wlfoo)}\nP={self._channel._xss[44].calc_P(wlfoo)}\nnf={self._channel._xss[44].calc_nf(wlfoo)}"
+        # )
+        # wlfoo = 0.43
+        # print(
+        #     f"wl={wlfoo}\nK={self._channel.calc_conveyance(44, wlfoo)}\nA={self._channel.calc_area(44, wlfoo)}\nP={self._channel._xss[44].calc_P(wlfoo)}\nnf={self._channel._xss[44].calc_nf(wlfoo)}"
+        # )
 
         # tell channel that wl is fixed for this iteration so it an store its
         # variables that depend on wl

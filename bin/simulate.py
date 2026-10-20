@@ -101,7 +101,7 @@ def run_model(infile: pathlib.Path):
             finish = pd.Timestamp.now() + pd.Timedelta(seconds=seconds_left)
 
             print(
-                f"\rProgress={int(100 * sim_elapsed / sim_total_seconds)}% dt={dt.total_seconds():.2f}s (est. finish at {finish.isoformat(timespec='seconds')})    ",
+                f"\rProgress={int(100 * sim_elapsed / sim_total_seconds)}% dt={dt.total_seconds():.2f}s st={'on ' if do_sediment_transport else 'off'} (est. finish at {finish.isoformat(timespec='seconds')})    ",
                 end="",
                 flush=True,
             )

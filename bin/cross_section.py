@@ -345,6 +345,30 @@ class CrossSection:
             ]
         ).sum()
 
+    # FIXME
+    # def calc_Bwet_debug(self, wl: float):
+    #     """Return water surface width for given water level.
+    #
+    #     Returns
+    #     -------
+    #     float
+    #         The sum of Bwet over left, channel, right
+    #     """
+    #
+    #     le = self._Bwet_interpolator[Loc.LEFT]
+    #     ch = self._Bwet_interpolator[Loc.CHANNEL]
+    #     ri = self._Bwet_interpolator[Loc.RIGHT]
+    #     print(f"RI is {ri}, with {ri.get_np()}")
+    #     print(
+    #         np.array(
+    #             [
+    #                 le.eval(wl) if le else 0,
+    #                 ch.eval(wl - self.min_bed_level) if ch else 0,
+    #                 ri.eval(wl) if ri else 0,
+    #             ]
+    #         )
+    #     )
+
     def _Bwet(self, wl: float, loc: Loc):
         """Return water surface width for given water level."""
         return sum(w for _, _, w, _ in self._wetted_segments(wl, loc))

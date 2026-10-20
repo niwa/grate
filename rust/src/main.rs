@@ -80,9 +80,10 @@ fn main() -> Result<()> {
             let finish = chrono::Local::now() + chrono::Duration::milliseconds((seconds_left * 1000.0) as i64);
 
             print!(
-                "\rProgress={}%, dt={:.2}s (est. finish at {})    ",
+                "\rProgress={}%, dt={:.2}s st={} (est. finish at {})    ",
                 (100.0 * sim_elapsed / sim_total_seconds) as u32,
                 dt,
+                if do_sediment_transport {"on "} else {"off"},
                 finish.format("%Y-%m-%dT%H:%M:%S"),
             );
             std::io::stdout().flush()?;

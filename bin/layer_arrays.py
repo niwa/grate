@@ -180,6 +180,8 @@ class LayerArrays:
         """(nc,) proportion of active layer smaller than SAND_SIZE"""
         cf = self._cumfreq()
         xp = self._phi[::-1]  # np.interp wants x increasing
+        # FIXME
+        # print(f"x={-np.log(SAND_SIZE)} xp={xp} row={cf}")
         return np.array([np.interp(-np.log(SAND_SIZE), xp, row[::-1]) for row in cf])
 
     def percentile(self, x: float):
@@ -231,6 +233,7 @@ class LayerArrays:
         gsv, sand_fraction, dsm: (nc,)
         Returns (nc, nbins, nlith), per unit width (multiply by Bwet outside).
         """
+        # print(f"\ngsv={gsv}\nFs={sand_fraction}\ndsm={dsm}")
         gsv = np.asarray(gsv)[:, None, None]  # (nc,1,1)
         Fs = np.asarray(sand_fraction)  # (nc,)
         dsm = np.asarray(dsm)  # (nc,)

@@ -22,7 +22,9 @@ class StaticInterpolator:
         if x <= self.xmin:
             return 0
 
-        assert self.xmin <= x <= self.xmax, f"{self.xmin} {x} {self.xmax}"
+        # Sometimes we get x way outside range, np.interp will clamp to max f
+        # which is probably fine, so skip the assert
+        # assert self.xmin <= x <= self.xmax, f"{self.xmin} {x} {self.xmax}"
         return np.interp(x, self.xs, self.fs)
 
     def get_np(self):

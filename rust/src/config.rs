@@ -86,7 +86,7 @@ fn read_tabs(dir: &PathBuf, fname: &str, nc: usize) -> Result<Vec<CrossSectionTa
             let t = a.column(0).to_owned();
             let v = a.column(1).to_owned().into_dyn();
 
-            Ok(Some(InterpArray::from_arrays(t, v)))
+            Ok(Some(InterpArray::from_arrays(t, v, true)))
         };
         tabs.push((read(0)?, read(1)?, read(2)?));
     }
@@ -149,8 +149,8 @@ impl Config {
                 rgsizes: read_array1(&mut grain, "rgsizes"),
                 uppersizes: read_array1(&mut grain, "uppersizes"),
                 sediment_densities: read_array1(&mut grain, "sediment_densities"),
-                sediment: Some(InterpArray::new(&config_path(dir, "sediment.npz"))?),
-                inflow: Some(InterpArray::new(&config_path(dir, "inflow.npz"))?),
+                sediment: Some(InterpArray::new(&config_path(dir, "sediment.npz"), false)?),
+                inflow: Some(InterpArray::new(&config_path(dir, "inflow.npz"), false)?),
                 downstream: Some(Downstream::new(get(&yaml, "downstream"))?),
                 acfd: read_array3(&mut grain, "acfd"),
                 scfd: read_array3(&mut grain, "scfd"),

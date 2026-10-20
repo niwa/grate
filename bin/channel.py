@@ -37,7 +37,7 @@ class Channel:
         # these are set after propogate sediment
         nbins = cfg.grain_size_profiles.num_bins
         nlith = cfg.grain_size_profiles.num_lith
-        self._Qb_jli = np.empty((len(self._cs), nbins, nlith))
+        self._Qb_jli = np.zeros((len(self._cs), nbins, nlith))
         self._cum_transport = np.zeros(self._Qb_jli.shape)
         self._grain_shear_velocity = np.empty(len(self._cs))
         self._sand_fraction = np.empty(len(self._cs))
@@ -201,6 +201,13 @@ class Channel:
             nc x nbins x nlith 3d array.  (c, j, li) element is bed transport
             at chainage index c for li lith group and j proportion size
         """
+        # FIXME
+        # foo = self._layers.qb_jli(
+        #     self._grain_shear_velocity, self._sand_fraction, self._dsm
+        # )
+        # print(f"qb_jli at 1259 =\n{foo[1259]}")
+        # print(f"bwet at 1259 =\n{self._Bwet[1259]}")
+
         return (
             self._layers.qb_jli(
                 self._grain_shear_velocity, self._sand_fraction, self._dsm
@@ -220,6 +227,9 @@ class Channel:
     def set_transport_rates(self):
         self._Qb_jli[:] = self.calc_Qb_jli()
         self._cum_transport += self._Qb_jli * self._dt
+        # FIXME
+        # print(f"Updating cum trans\n{self._cum_transport.sum()}")
+        # print(self._Qb_jli[1259])
 
     def propagate_sediment(self, t: pd.Timestamp):
 
@@ -288,6 +298,11 @@ class Channel:
         """Hydrodynamics model has sorted wl, this is to update all the profile
         arrays that rely on wl"""
 
+        # FIXME
+        # print(
+        #     f"Calculating bwet using wc[1259]={wl[1259]}, it is {self._xss[1259].calc_Bwet(wl[1259])}"
+        # )
+        # self._xss[1259].calc_Bwet_debug(wl[1259])
         for c, w in zip(range(self._nc), wl):
             self._Bwet[c] = self._xss[c].calc_Bwet(w)
             self._area[c] = self.calc_area(c, w)

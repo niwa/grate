@@ -115,6 +115,18 @@ def prep_model(infile: pathlib.Path, odir: pathlib.Path):
         print(f"Writing {fname}")
         np.savez(fname, **tabs)
 
+    # print(chan._xss[44]._P_interpolator[Loc.CHANNEL].xs)
+    # print(chan._xss[44]._P_interpolator[Loc.CHANNEL].fs)
+    #
+    # np.set_printoptions(precision=17)
+    # xs = np.asarray(chan._xss[44]._P_interpolator[Loc.CHANNEL].xs)
+    # fs = np.asarray(chan._xss[44]._P_interpolator[Loc.CHANNEL].fs)
+    # print("xs:", xs)
+    # print("fs:", fs)
+    # x = 0.43
+    # print("x:", repr(x))
+    # print("np.interp:", np.interp(x, xs, fs))
+
     # layer grain props
     fname = odir / "grain.npz"
     print(f"Writing {fname}")

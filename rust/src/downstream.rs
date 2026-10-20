@@ -32,7 +32,7 @@ impl Downstream {
             },
             "elevation" => {
                 let fname = PathBuf::from(get("fname").as_str().unwrap());
-                ds.elevation = Some(InterpArray::new(&fname)?);
+                ds.elevation = Some(InterpArray::new(&fname, false)?);
             },
             _ => panic!("Unknown downstream boundary type '{kind}'"),
         }

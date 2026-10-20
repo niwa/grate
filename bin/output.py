@@ -96,13 +96,10 @@ class Output:
         )
 
     def _get_timestep(self):
-        return self.step
+        return np.uint32(self.step)
 
     def get_timestep(self):
-        return xr.DataArray(
-            self._get_timestep(),
-            name="timestep",
-        )
+        return xr.DataArray(self._get_timestep(), name="timestep")
 
     def _get_velocity(self):
         return self._hmodel.get_vel()
@@ -150,7 +147,7 @@ class Output:
             coords={
                 "chainage": self._cs,
                 "rel_grain_sizes": self._rgsizes,
-                "lith": list(range(self._nlith)),
+                "lith": np.arange(self._nlith, dtype=np.uint32),
             },
             name="cum_transport",
         )
@@ -189,7 +186,7 @@ class Output:
             coords={
                 "chainage": self._cs,
                 "rel_grain_sizes": self._rgsizes,
-                "lith": list(range(self._nlith)),
+                "lith": np.arange(self._nlith, dtype=np.uint32),
             },
             name="transport_rate",
         )
