@@ -1,0 +1,3 @@
+This is a command line program.  Start a terminal or shell and type
+grate prep <input yaml> <output folder>
+grater <output folder>
