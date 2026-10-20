@@ -1,6 +1,6 @@
 use anyhow::Result;
 use lambert_w::lambert_w0;
-use ndarray::{ArrayView1, Zip, Axis, Array1, Array2, Array3, Ix3, s};
+use ndarray::{ArrayView1, Zip, Axis, Array1, Array2, Array3, Ix3};
 use crate::config::{Config, CrossSectionTab};
 use crate::interp_array::InterpArray;
 

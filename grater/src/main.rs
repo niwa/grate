@@ -17,7 +17,7 @@ mod interp_array;
 mod downstream;
 
 #[derive(Parser)]
-#[command(name = "rsim")]
+#[command(name = "grater")]
 struct Cli {
     /// Folder containing config.yaml
     idir: PathBuf,
