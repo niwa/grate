@@ -14,7 +14,7 @@
 #define MyAppName "Grater"
 #define MyAppPublisher "Earthsciences NZ"
 #define MyAppURL "https://github.com/niwa/grate"
-#define MyAppExeName "grater"
+#define MyAppExeName "grater.exe"
 #define MyAppVersion GetVersion("etc\version.txt")
 
 [Setup]
