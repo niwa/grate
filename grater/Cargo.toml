@@ -13,6 +13,12 @@ chrono = "0.4.45"
 rootseek = "1.0.3"
 csv = "1.4.0"
 lambert_w = "2.0.5"
-netcdf = "0.12.1"
 strum = { version = "0.28.0", features = ["derive"] }
 strum_macros = "0.28.0"
+
+[target.'cfg(not(windows))'.dependencies]
+netcdf = "0.12.1"
+
+[target.'cfg(windows)'.dependencies]
+netcdf = { version = "0.12.1", features = ["static"] }
+
