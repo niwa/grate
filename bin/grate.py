@@ -3,8 +3,6 @@
 # Compilation mode, support OS-specific options
 # nuitka-project: --mode=standalone
 # nuitka-project: --include-data-dir=etc=etc
-# pandas/numpy can pull in scipy, don't want the bloat
-# nuitka-project: --nofollow-import-to=scipy
 # matplotlib don't want the backends
 # nuitka-project: --enable-plugin=no-qt
 # xarray needs an engine

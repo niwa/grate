@@ -46,7 +46,7 @@ InfoAfterFile=C:\Users\mattw\Documents\grate\inno_grater_after_install.txt
 ; Remove the following line to run in administrative install mode (install for all users).
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
-OutputBaseFilename=grate-{#MyAppVersion}
+OutputBaseFilename=grater-{#MyAppVersion}
 SolidCompression=yes
 WizardStyle=modern dynamic
 ChangesEnvironment=yes
@@ -56,7 +56,7 @@ ChangesEnvironment=yes
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "C:\Users\mattw\Documents\grate\grater\target\release\grater"; DestDir: "{app}"
+Source: "C:\Users\mattw\Documents\grate\grater\target\release\grater.exe"; DestDir: "{app}"
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
