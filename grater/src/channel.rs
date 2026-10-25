@@ -24,7 +24,7 @@ pub struct Channel {
     sediment_densities: Array1<f64>,    // (nlith, )
     min_bed_level: Array1<f64>,         // (nc, )
     mean_bed_level: Array1<f64>,        // (nc, )
-    fact: Array1<f64>,                  // (nc-1,), cache 1 / (cs[i + 1] - cs[i]) / (1 - poro) / bchan[i + 1]
+    fact: Array1<f64>,                  // (nc-1,), 1 / (cs[i + 1] - cs[i]) / (1 - poro) / bchan[i + 1]
 
     sediment: InterpArray,
     ng: Array2<f64>,                    // (nc, 3)
@@ -158,7 +158,7 @@ impl Channel {
         ])
     }
 
-    pub fn calc_bwet(&self, c: usize, wl: f64) -> f64 {
+    fn calc_bwet(&self, c: usize, wl: f64) -> f64 {
         let tab = &self.bwet_tab[c];
         let d = wl - self.min_bed_level[c];
         return 
@@ -166,19 +166,6 @@ impl Channel {
             tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]) +
             tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]);
     }
-
-    // FIXME
-    // pub fn calc_bwet_debug(&self, c: usize, wl: f64) -> f64 {
-    //     let tab = &self.bwet_tab[c];
-    //     let d = wl - self.min_bed_level[c];
-    //     println!("{}", tab.0.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]));
-    //     println!("{}", tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]));
-    //     println!("{}", tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]));
-    //     return 
-    //         tab.0.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]) +
-    //         tab.1.as_ref().map_or(0.0, |v| v.value_at(d).into_dimensionality::<ndarray::Ix0>().unwrap()[()]) +
-    //         tab.2.as_ref().map_or(0.0, |v| v.value_at(wl).into_dimensionality::<ndarray::Ix0>().unwrap()[()]);
-    // }
 
     fn calc_p(&self, c: usize, wl: f64) -> Array1<f64> {
         let tab = &self.p_tab[c];

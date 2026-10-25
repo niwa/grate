@@ -1,8 +1,16 @@
 import numpy as np
 import pandas as pd
+from enum import Enum
 from gin import GrateConfig
-from cross_section import CrossSection, Loc
+from cross_section import CrossSection
 from layer_arrays import LayerArrays
+
+
+class Loc(Enum):
+    LEFT = "left"
+    CHANNEL = "channel"
+    RIGHT = "right"
+    ALL = "all"
 
 
 class Channel:
@@ -53,7 +61,7 @@ class Channel:
 
     def _init_layer_arrays(self):
         """Grain-size layer state for every chainage point, as arrays with a
-        leading chainage axis (acfd, scfd: nc x nbins x nlith).  This does the
+        leading chainage axis (aprop, sprop: nc x nbins x nlith).  This does the
         "Interp" resolution and interpolation to self._cs that used to be done
         per cross section by LayerStack.
         """
@@ -205,8 +213,11 @@ class Channel:
         # foo = self._layers.qb_jli(
         #     self._grain_shear_velocity, self._sand_fraction, self._dsm
         # )
-        # print(f"qb_jli at 1259 =\n{foo[1259]}")
-        # print(f"bwet at 1259 =\n{self._Bwet[1259]}")
+        # print(foo)
+        # print(self._Bwet)
+        # import sys
+        #
+        # sys.exit(0)
 
         return (
             self._layers.qb_jli(
@@ -226,6 +237,10 @@ class Channel:
 
     def set_transport_rates(self):
         self._Qb_jli[:] = self.calc_Qb_jli()
+        # print(self._Qb_jli)
+        # import sys
+        #
+        # sys.exit(0)
         self._cum_transport += self._Qb_jli * self._dt
         # FIXME
         # print(f"Updating cum trans\n{self._cum_transport.sum()}")
@@ -236,12 +251,19 @@ class Channel:
         # sediment rates at all chainages, nc x nbins x nlith
         bdy_sed_rate = self._cfg._processed_sediment_boundary.value_at(t)
 
+        # print(0, bdy_sed_rate)
+
         # sediment transport rates
         up_Qb_jli = self._Qb_jli[:-1] + bdy_sed_rate[:-1]
         my_Qb_jli = self._Qb_jli[1:]
 
+        # print(1, my_Qb_jli)
+
         dc = np.diff(self._cs)
         fact = 1.0 / dc / (1 - self.poro) / self._Bchan[1:]
+
+        # print(2, dc)
+        # print(3, fact)
 
         # dy by dt to figure out next dt
         dydt = fact * (up_Qb_jli.sum(axis=(1, 2)) - my_Qb_jli.sum(axis=(1, 2)))
@@ -252,9 +274,15 @@ class Channel:
         fact *= self._dt
         dy = dydt * self._dt
 
+        # print(4, fact)
+        # print(5, dy)
+
         # Vectorise the sediment proportions and flux differences.
         p = my_Qb_jli / my_Qb_jli.sum(axis=(1, 2))[:, None, None]
         flux_diff = (up_Qb_jli - my_Qb_jli) * fact[:, None, None]
+
+        # print(6, p)
+        # print(7, flux_diff)
 
         # aggrade/degrade cross-section channel
         for i, c in enumerate(range(1, self._nc)):
@@ -264,15 +292,34 @@ class Channel:
             self._min_bed_level[c] = self._xss[c].min_bed_level
             self._mean_bed_level[c] = self._xss[c].mean_bed_level
 
+        # print(8, self._min_bed_level)
+        # print(9, self._mean_bed_level)
+
         # Layer state is one array: update every chainage in a single shot
         self._layers.update_active_layer(
-            dy, flux_diff, p, self._cfg.morphological.la, rows=slice(1, None)
+            dy,
+            flux_diff,
+            p,
+            self._cfg.morphological.alayer_max_thickness,
+            rows=slice(1, None),
         )
 
+        # print(10, self._layers.acfd[1:])
+
+        # FIXME, change storage layer f_jli
+
+        # scfd top storage layer = (scfd top storage layer * top storage layer thickness + self._xss[c].f_interface(dy > 0, p) * dy) / (scfd top storage layer thickness + dy)
+        # scfd top storage thickness += dy
+        #
+        # if top storage thickness would be > than morp.layerthicknes we have do something else
         # FIXME, change storage layer f_jli
 
         # now we can update all the cache variables
         self.set_grain_arrays()
+
+        # import sys
+        #
+        # sys.exit(0)
 
     def set_grain_arrays(self):
         """don't do gsb on init since Sf and vel wrong so can't calculate gsm"""

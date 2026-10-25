@@ -276,20 +276,26 @@ class LayerArrays:
             self.scfd[rows],
         )
 
-    def update_active_layer(self, dy, flux_diff, p, la, rows=slice(None)):
+    def update_active_layer(self, dy, flux_diff, p, athick, rows=slice(None)):
         """Vectorised version of the per-cross-section loop in
-        Channel.propogate_sediment: acfd += (flux_diff - f_interface * dy) / la
+        Channel.propogate_sediment: acfd += (flux_diff - f_interface * dy) /
+        athick
 
         dy: (n,), flux_diff and p: (n, nbins, nlith), rows: which chainages
         """
         f_int = self.f_interface(dy > 0, p, rows)
-        df = (flux_diff - f_int * dy[:, None, None]) / la
+        # FIXME
+        # print(f_int)
+        df = (flux_diff - f_int * dy[:, None, None]) / athick
+        # print(df)
+        # print(self.acfd)
         self.add_to_acfd(df, rows)
+        # print(self.acfd)
 
     def add_to_acfd(self, df, rows=slice(None)):
         self.acfd[rows] += df  # in place, so views handed out stay in sync
 
         # FIXME carried over from LayerStack.add_to_acfd
-        row_sums = self.acfd[rows].sum(axis=2)
-        if not np.all((row_sums >= 0) & (row_sums <= 1)):
-            print(self.acfd[rows])
+        # row_sums = self.acfd[rows].sum(axis=2)
+        # if not np.all((row_sums >= 0) & (row_sums <= 1)):
+        #     print(self.acfd[rows])

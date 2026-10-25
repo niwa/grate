@@ -132,8 +132,10 @@ def prep_model(infile: pathlib.Path, odir: pathlib.Path):
     print(f"Writing {fname}")
     np.savez(
         fname,
-        acfd=chan._layers.acfd,  # (nc, nbins, nlith)
-        scfd=chan._layers.scfd,  # (nc, nbins, nlith)
+        aprop=chan._layers.aprop,  # (nc, nbins, nlith)
+        sprop=chan._layers.sprop,  # (nc, nlayer, nbins, nlith)
+        athickness=chan._layers.athickness,  # (nc,)
+        sthickness=chan._layers.sthickness,  # (nc, nlayer)
         rgsizes=chan._layers.rgsizes,  # (nbins, )
         uppersizes=chan._layers.uppersizes,  # (nbins, )
         sediment_densities=chan._layers.sediment_densities,  # (nprofiles,)

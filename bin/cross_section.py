@@ -334,9 +334,18 @@ class CrossSection:
             The sum of Bwet over left, channel, right
         """
 
+        # FIXME
         le = self._Bwet_interpolator[Loc.LEFT]
         ch = self._Bwet_interpolator[Loc.CHANNEL]
         ri = self._Bwet_interpolator[Loc.RIGHT]
+        # foo = np.array(
+        #     [
+        #         le.eval(wl) if le else 0,
+        #         ch.eval(wl - self.min_bed_level) if ch else 0,
+        #         ri.eval(wl) if ri else 0,
+        #     ]
+        # ).sum()
+        # print(f"Doing calc_Bwet {wl=} {self.min_bed_level} got {foo}")
         return np.array(
             [
                 le.eval(wl) if le else 0,

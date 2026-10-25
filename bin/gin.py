@@ -40,9 +40,9 @@ class HDParams(GrateBase):
 
 
 class Morphological(GrateBase):
-    layer: p.StrictFloat
-    la: p.StrictFloat
-    nbs: p.StrictInt
+    alayer_max_thickness: p.StrictFloat
+    slayer_max_thickness: p.StrictFloat
+    num_slayers: p.StrictInt
     poro: p.StrictFloat
     alpha_s: p.StrictFloat | None = None
     neqal: p.StrictInt = 0.0

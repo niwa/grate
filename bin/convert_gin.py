@@ -64,6 +64,9 @@ def ykey(key: str) -> str:
         "TE": "end",
         "NO_CYCLES": "num_cycles",
         "NPRTF": "frequency",
+        "LA": "alayer_max_thickness",
+        "LAYER": "slayer_max_thickness",
+        "NBS": "num_slayers",
     }.get(key, key.lower())
 
 

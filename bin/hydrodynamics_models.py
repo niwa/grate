@@ -19,7 +19,7 @@ class HydroDynamicModel:
 
         self._cfg = cfg
         self._channel = chan
-        self._cs = self._channel._chainpts()
+        self._cs = self._channel._cs
 
         # make sure the inflow and sediment boundary conditions know about (potentially) new chainage
         cfg._processed_inflow.rechainage(self._cs)
