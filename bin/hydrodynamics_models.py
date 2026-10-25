@@ -5,7 +5,7 @@ from functools import lru_cache
 
 import utils
 from gin import GrateConfig
-from channel import Channel, Loc
+from channel import Channel
 
 
 class HydroDynamicModel:
@@ -250,7 +250,7 @@ class QuasiSteadyModel(HydroDynamicModel):
 
         # tell channel that wl is fixed for this iteration so it an store its
         # variables that depend on wl
-        self._channel.set_profile_arrays(self._wl)
+        # self._channel.set_profile_arrays(self._wl)
 
 
 class DynamicWaveModel(HydroDynamicModel):

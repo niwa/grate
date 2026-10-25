@@ -1,219 +1,83 @@
 import math
+import copy
 import numpy as np
 import pandas as pd
 from enum import Enum
 from gin import CrossSectionProfile
+
 from static_interpolator import StaticInterpolator
+from grainprofile import (
+    get_grain_props,
+    # get_representative_grain_sizes,
+    # get_grain_size_bin_uppers,
+)
 
 
 class Loc(Enum):
     LEFT = "left"
     CHANNEL = "channel"
     RIGHT = "right"
-    ALL = "all"
 
 
 # properties that might be undefined and need interpolating
-XS_INTERP_PROPS = ["formrf", "bankd90", "bedrock_rl", "qsfact", "lsf"]
+XS_INTERP_PROPS = [
+    "formrf",
+    "bankd90",
+    "bedrock_rl",
+    "qsfact",
+    "lsf",
+    "_aprop",
+    "_sprop",
+]
 
 
 class CrossSection:
     """A loaded CrossSectionProfile, includes metadata, xy points, derived props
 
-    Geometry and scalar properties only.  The grain-size layers for every
-    chainage live in Channel._layers (a layer_arrays.LayerArrays).
-
     Currently handles Flume or River cross sections.  Braided channel will need
     subclass
     """
 
-    def __init__(
-        self,
-        xs: CrossSectionProfile,
-        default_formrf,
-        # wallrf,
-    ):
+    def __init__(self, xs: CrossSectionProfile, cfg):
         self.chainage = xs.chainage
-        self.chainidx = None  # this will get filled in when interped
-        self.topoid = xs.topoid
-        self.river_name = xs.river_name
+        # self.chainidx = None  # this must be filled in later
 
         # might be "Interp" in which case we need to interpolate from neighbours
-        self.formrf = xs.formrf if xs.formrf is not None else default_formrf
+        self.formrf = xs.formrf if xs.formrf is not None else cfg.cross_sections.formrf
         self.bankd90 = xs.bankd90
         self.bedrock_rl = xs.bedrock_rl
         self.qsfact = xs.qsfact
         self.lsf = xs.lsf
 
+        # get profile, but can't set roughness, might be Interp
         self.df = pd.read_csv(xs.profile)
 
-        # can't set points yet since above variables might not be set
-        # self._set_points(self.df)
-
-    def __setup_interpolators(self):
-
-        # bank interpolators take elevations, and channel takes depths
-        #
-        # but all the lambdas have to take elevation, so for channel add on
-        # min_bed_level
-        #
-        bl = self.calc_min_bed_level()
-        for name in ("area", "P", "Bwet", "nf"):
-            setattr(
-                self,
-                f"_{name}_interpolator",
-                {
-                    Loc.LEFT: StaticInterpolator(
-                        lambda wl: getattr(self, f"_{name}")(wl, Loc.LEFT),
-                        self.left[:, 1],
-                    )
-                    if len(self.left)
-                    else None,
-                    Loc.CHANNEL: StaticInterpolator(
-                        lambda depth: getattr(self, f"_{name}")(
-                            depth + bl, Loc.CHANNEL
-                        ),
-                        self.channel[:, 1] - self.channel[:, 1].min(),
-                    ),
-                    Loc.RIGHT: StaticInterpolator(
-                        lambda wl: getattr(self, f"_{name}")(wl, Loc.RIGHT),
-                        self.right[:, 1],
-                    )
-                    if len(self.right)
-                    else None,
-                },
+        # nbins x nlith
+        gs = cfg.grain_size_profiles
+        # if groups are good, we can setup aprop and sprop
+        if xs.active_layer_group != "Interp":
+            self._aprop = get_grain_props(
+                xs.active_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
             )
-
-    @classmethod
-    def resolve_interpolated_properties(cls, xss: dict):
-        """Resolve properties marked 'Interp' using neighbouring cross sections."""
-
-        cs = sorted(xss)
-
-        def interp(cidx: int, prop: str):
-            """Interpolate at chainidx the given property."""
-
-            i = cs.index(cidx)
-
-            left = None
-            for c in reversed(cs[:i]):
-                val = getattr(xss[c], prop)
-                if not (isinstance(val, str) and val == "Interp"):
-                    left = c
-                    break
-
-            right = None
-            for c in cs[i + 1 :]:
-                val = getattr(xss[c], prop)
-                if not (isinstance(val, str) and val == "Interp"):
-                    right = c
-                    break
-
-            if left is None or right is None:
-                raise ValueError(
-                    f"Can't interp {prop!r} at chainage {cidx}: no valid cross-sections"
-                )
-
-            left_value = getattr(xss[left], prop)
-            right_value = getattr(xss[right], prop)
-
-            f = (cidx - left) / (right - left)
-
-            return left_value + f * (right_value - left_value)
-
-        for c in cs:
-            for prop in XS_INTERP_PROPS:
-                if getattr(xss[c], prop) == "Interp":
-                    setattr(xss[c], prop, interp(c, prop))
-
-        for xs in xss.values():
-            xs._set_points(xs.df)
-
-    def _set_points(self, df):
-        """Set profile points and calculate derived properties."""
-        self.df = df
-
-        # get roughness in for each segment in the profile
-        if "relrf" in self.df.columns:
-            self.df["roughness"] = self.df["relrf"].fillna(1) * self.formrf
         else:
-            self.df["roughness"] = self.formrf
+            self._aprop = "Interp"
 
-        # break into left, channel and right
-        self.profile, self.left, self.channel, self.right = self._split_pts_into_three(
-            self.df
-        )
-
-        self.mean_bed_level = self.calc_mean_bed_level()
-        self.min_bed_level = self.calc_min_bed_level()
-
-        self.__setup_interpolators()
-
-    def interpolate(
-        self, other: "CrossSection", f: float, chainidx: int
-    ) -> "CrossSection":
-        """Return an approximate interpolation between two cross sections.
-
-        Geometry is taken from the closer cross section and shifted to the
-        interpolated mean bed level. Numeric properties linearly interpolated.
-        (Sediment layers are interpolated in Channel, see LayerArrays.from_config.)
-
-        Parameters
-        ----------
-        other: CrossSection
-            Other cross section to interpolate with
-
-        f: float
-            interpolation proportion 0 to 1.  0 means self, 1 means other
-
-        chainidx: int
-            chain index to assign to the interpolant
-
-        """
-
-        def interp(a, b, f):
-            if a is None or b is None:
-                return None
-            return a + f * (b - a)
-
-        assert 0 <= f <= 1, f"Interpolation fraction must be between 0 and 1, got {f}"
-
-        cs = self.__class__.__new__(self.__class__)
-
-        cs.chainage = self.chainage + f * (other.chainage - self.chainage)
-        cs.chainidx = chainidx
-
-        # These aren't really interpolated.
-        cs.topoid = self.topoid if f < 0.5 else other.topoid
-        cs.river_name = self.river_name if f < 0.5 else other.river_name
-
-        cs.formrf = interp(self.formrf, other.formrf, f)
-        # cs._wallrf_del = interp(self._wallrf_del, other._wallrf_del, f)
-        cs.bankd90 = interp(self.bankd90, other.bankd90, f)
-        cs.bedrock_rl = interp(self.bedrock_rl, other.bedrock_rl, f)
-        cs.qsfact = interp(self.qsfact, other.qsfact, f)
-        cs.lsf = interp(self.lsf, other.lsf, f)
-
-        # Interpolate the mean bed level, then use the nearer geometry.
-        target_bed = self.mean_bed_level + f * (
-            other.mean_bed_level - self.mean_bed_level
-        )
-
-        source = self if f < 0.5 else other
-        df = source.df.copy()
-        df["y"] += target_bed - source.mean_bed_level
-        cs._set_points(df)
-        return cs
+        if xs.storage_layer_group != "Interp":
+            self._sprop = get_grain_props(
+                xs.storage_layer_group - 1, gs.grain_size_cfds, gs.lithfractions
+            )
+        else:
+            self._sprop = "Interp"
 
     def _split_pts_into_three(self, df):
-        """Return entire profile, left, channel and right profiles as NumPy arrays.
+        """Return left, channel and right profiles as NumPy arrays.
 
         Each array has columns: x, y, roughness.
         """
 
         if "ob" not in df.columns:
             data = df[["x", "y", "roughness"]].to_numpy()
-            return data, data[:0], data, data[:0]
+            return data[:0], data, data[:0]
 
         data = df[["x", "y", "roughness", "ob"]].to_numpy()
 
@@ -246,9 +110,9 @@ class CrossSection:
                 channel = data[i1 : i2 + 1]
                 right = data[i2:]
 
-        return data, left, channel, right
+        return left, channel, right
 
-    def calc_mean_bed_level(self):
+    def _calc_mean_bed_level(self):
         """Return weighted mean of the bed elevations in channel"""
         x = self.channel[:, 0]
         y = self.channel[:, 1]
@@ -263,15 +127,253 @@ class CrossSection:
                 dx = (x[2:] - x[:-2]) / 2
                 return np.sum(dx * y[1:-1]) / np.sum(dx)
 
-    def calc_min_bed_level(self):
+    def _calc_min_bed_level(self):
         """The minimum bed level."""
         return self.channel[:, 1].min()
 
-    def aggrade_bed(self, dy):
-        """Add dy to the channel bed level (dy can be negative)."""
-        self.channel[:, 1] += dy
-        self.min_bed_level += dy
-        self.mean_bed_level += dy
+    @classmethod
+    def spaced_chainpts(cls, cfg):
+        """Return probably spaced chain points
+
+        The chainage's hit the cross section profiles in cfg, but potentially
+        introduce new ones if they are too widely spaced
+        """
+        c = np.sort([xs.chainage for xs in cfg.cross_sections.profiles])
+
+        # number of intervals between each chainage
+        gaps = np.diff(c)
+        ints = np.ceil(gaps / cfg.discretisation.max_dc).astype(int)
+
+        return np.concatenate(
+            [np.linspace(a, b, n + 1)[:-1] for a, b, n in zip(c[:-1], c[1:], ints)]
+            + [c[-1:]]
+        )
+
+    @classmethod
+    def load_interped_cross_sections(cls, cfg):
+        """Get cross_sections, interp them onto new chainage"""
+        xss = cls.load_cross_sections(cfg)
+        cls.resolve_interped_props(xss)
+        cs = cls.spaced_chainpts(cfg)
+        return cls.interp_onto_new_chainages(xss, cs)
+
+    @classmethod
+    def load_cross_sections(cls, cfg):
+        """Return un-interpolated cross sections from cfg"""
+
+        return {
+            xs.chainage: CrossSection(xs, cfg) for xs in cfg.cross_sections.profiles
+        }
+
+    @classmethod
+    def resolve_interped_props(cls, xss: dict):
+        """Resolve Interp properties using neighbours, modifying xss in place
+
+        Returns
+        -------
+        None
+        """
+
+        # sorted chainages
+        cidxs = sorted(xss)
+
+        def interp(cidx: int, prop: str):
+            """Interpolate at chainidx the given property."""
+
+            i = cidxs.index(cidx)
+
+            left = None
+            for c in reversed(cidxs[:i]):
+                val = getattr(xss[c], prop)
+                if not (isinstance(val, str) and val == "Interp"):
+                    left = c
+                    break
+
+            right = None
+            for c in cidxs[i + 1 :]:
+                val = getattr(xss[c], prop)
+                if not (isinstance(val, str) and val == "Interp"):
+                    right = c
+                    break
+
+            if left is None or right is None:
+                raise ValueError(
+                    f"Can't interp {prop!r} at chainage {cidx}: no valid cross-sections"
+                )
+
+            left_value = getattr(xss[left], prop)
+            right_value = getattr(xss[right], prop)
+
+            f = (cidx - left) / (right - left)
+
+            return left_value + f * (right_value - left_value)
+
+        for cidx in sorted(xss):
+            for prop in XS_INTERP_PROPS:
+                val = getattr(xss[cidx], prop)
+                if isinstance(val, str) and val == "Interp":
+                    setattr(xss[cidx], prop, interp(cidx, prop))
+
+        # now we can set roughness since formrf done
+        for xs in xss.values():
+            if "relrf" in xs.df.columns:
+                xs.df["roughness"] = xs.df["relrf"].fillna(1) * xs.formrf
+            else:
+                xs.df["roughness"] = xs.formrf
+
+        # can split df into left/channel/right and calculate bed levels
+        for xs in xss.values():
+            # break into left, channel and right
+            xs.left, xs.channel, xs.right = xs._split_pts_into_three(xs.df)
+            xs.mean_bed_level = xs._calc_mean_bed_level()
+            xs.min_bed_level = xs._calc_min_bed_level()
+
+    @classmethod
+    def interp_onto_new_chainages(cls, xss: dict, cs: np.array) -> list:
+        """Make new CrossSections on the given chainages by interpolation
+
+        Parameters
+        ----------
+        xss: dict
+            Maps chainage to existing CrossSections.  There must be a CrossSection
+            at cs.min and cs.max.
+
+        cs: np.array
+            Sorted chainage points
+
+        Returns
+        -------
+        list:
+            New CrossSections fully interpolated
+        """
+
+        def __interp_two(left, right, f: float) -> CrossSection:
+            """Return an approximate interpolation between two cross sections.
+
+            Geometry is taken from the closer cross section and shifted to the
+            interpolated mean bed level. Numeric properties linearly interpolated.
+
+            Parameters
+            ----------
+            left: CrossSection
+                Cross section to the left to interpolate with
+
+            right: CrossSection
+                Cross section to the right to interpolate with
+
+            f: float
+                interpolation proportion 0 to 1.  0 means left, 1 means right
+            """
+
+            def interp(a, b, f):
+                # some of the props can be None, they are valid
+                if a is None:
+                    if b is None:
+                        return None
+                    else:
+                        return b
+                elif b is None:
+                    return a
+
+                return a + f * (b - a)
+
+            assert 0 <= f <= 1, (
+                f"Interpolation fraction must be between 0 and 1, got {f}"
+            )
+
+            # the new one
+            source = left if f < 0.5 else right
+            me = copy.deepcopy(source)
+            # this isn't perfectly accurate, so skip, set it outside interp
+            # me.chainage = left.chainage + f * (right.chainage - left.chainage)
+
+            for prop in XS_INTERP_PROPS:
+                newval = interp(getattr(left, prop), getattr(right, prop), f)
+                setattr(me, prop, newval)
+
+            # Interpolate the mean bed level, then use the nearer geometry
+            t = left.mean_bed_level + f * (right.mean_bed_level - left.mean_bed_level)
+            me.df["y"] += t - source.mean_bed_level
+            return me
+
+        # sorted current chainages
+        xs_chainpts = sorted(xss)
+
+        newxss = []
+        for chainage in cs:
+            # Exact cross section
+            if chainage in xss:
+                newxss.append(xss[chainage])
+                continue
+
+            # Find surrounding cross sections
+            for c0, c1 in zip(xs_chainpts[:-1], xs_chainpts[1:]):
+                if c0 <= chainage <= c1:
+                    left = xss[c0]
+                    right = xss[c1]
+                    break
+            else:
+                raise ValueError(f"No cross sections surrounding chainage {chainage}")
+
+            f = (chainage - c0) / (c1 - c0)
+            new = __interp_two(left, right, f)
+            new.chainage = chainage
+            new.left, new.channel, new.right = new._split_pts_into_three(new.df)
+            new.mean_bed_level = new._calc_mean_bed_level()
+            new.min_bed_level = new._calc_min_bed_level()
+            newxss.append(new)
+
+        return newxss
+
+    def calc_Bchan(self):
+        """Return channel width"""
+        return self.channel[-1, 0] - self.channel[0, 0]
+
+    def get_profile_interpolators(self, name):
+        """Profile interpolator for area, P, Bwet, nf
+
+        Parameters
+        ----------
+        name: str
+            area|P|Bwet|nf
+
+            P is wetted perimeter
+            Bwet is wetted surface
+            nf is roughness for the wetted cross section
+
+        Returns
+        -------
+        tuple:
+            [StaticInterpolator|None, StaticInterpolator|None, StaticInterpolator|None]
+            These give the values of name for the left/channel/right.
+
+            If the interpolator is None, there is no left/channel/right, you
+            can treat the value as 0.0.
+
+            The left and right interpolators take wl, the channel takes depth
+        """
+
+        # all the lambdas have to take elevation, so for channel add on
+        # min_bed_level.  The lambdas are used to create the tables, after that
+        # the x values are wl, depth, wl
+        #
+        bl = self.min_bed_level
+        return [
+            StaticInterpolator(
+                lambda wl: getattr(self, f"_{name}")(wl, Loc.LEFT), self.left[:, 1]
+            )
+            if len(self.left)
+            else None,
+            StaticInterpolator(
+                lambda depth: getattr(self, f"_{name}")(depth + bl, Loc.CHANNEL),
+                self.channel[:, 1] - bl,
+            ),
+            StaticInterpolator(
+                lambda wl: getattr(self, f"_{name}")(wl, Loc.RIGHT), self.right[:, 1]
+            )
+            if len(self.right)
+            else None,
+        ]
 
     def _wetted_segments(self, wl: float, loc: Loc):
         """Yield roughness, perimeter, width and area for each wetted segment."""
@@ -321,136 +423,16 @@ class CrossSection:
 
         return tuple(result)
 
-    def calc_Bchan(self):
-        """Return channel width"""
-        return self.channel[-1, 0] - self.channel[0, 0]
-
-    def calc_Bwet(self, wl: float):
-        """Return water surface width for given water level.
-
-        Returns
-        -------
-        float
-            The sum of Bwet over left, channel, right
-        """
-
-        # FIXME
-        le = self._Bwet_interpolator[Loc.LEFT]
-        ch = self._Bwet_interpolator[Loc.CHANNEL]
-        ri = self._Bwet_interpolator[Loc.RIGHT]
-        # foo = np.array(
-        #     [
-        #         le.eval(wl) if le else 0,
-        #         ch.eval(wl - self.min_bed_level) if ch else 0,
-        #         ri.eval(wl) if ri else 0,
-        #     ]
-        # ).sum()
-        # print(f"Doing calc_Bwet {wl=} {self.min_bed_level} got {foo}")
-        return np.array(
-            [
-                le.eval(wl) if le else 0,
-                ch.eval(wl - self.min_bed_level) if ch else 0,
-                ri.eval(wl) if ri else 0,
-            ]
-        ).sum()
-
-    # FIXME
-    # def calc_Bwet_debug(self, wl: float):
-    #     """Return water surface width for given water level.
-    #
-    #     Returns
-    #     -------
-    #     float
-    #         The sum of Bwet over left, channel, right
-    #     """
-    #
-    #     le = self._Bwet_interpolator[Loc.LEFT]
-    #     ch = self._Bwet_interpolator[Loc.CHANNEL]
-    #     ri = self._Bwet_interpolator[Loc.RIGHT]
-    #     print(f"RI is {ri}, with {ri.get_np()}")
-    #     print(
-    #         np.array(
-    #             [
-    #                 le.eval(wl) if le else 0,
-    #                 ch.eval(wl - self.min_bed_level) if ch else 0,
-    #                 ri.eval(wl) if ri else 0,
-    #             ]
-    #         )
-    #     )
-
     def _Bwet(self, wl: float, loc: Loc):
         """Return water surface width for given water level."""
         return sum(w for _, _, w, _ in self._wetted_segments(wl, loc))
 
-    def calc_area(self, wl: float):
-        """Area of water below this water level and above min_bed_level.
-
-        Returns
-        -------
-        np.array
-            [area in left, area in channel, area in right]
-        """
-        le = self._area_interpolator[Loc.LEFT]
-        ch = self._area_interpolator[Loc.CHANNEL]
-        ri = self._area_interpolator[Loc.RIGHT]
-        return np.array(
-            [
-                le.eval(wl) if le else 0,
-                ch.eval(wl - self.min_bed_level) if ch else 0,
-                ri.eval(wl) if ri else 0,
-            ]
-        )
-
     def _area(self, wl: float, loc: Loc):
         return sum(a for _, _, _, a in self._wetted_segments(wl, loc))
-
-    def calc_P(self, wl: float):
-        """Wetted perimeter for given water level.
-
-        Returns
-        -------
-        np.array
-            [P in left, P in channel, P in right]
-        """
-        le = self._P_interpolator[Loc.LEFT]
-        ch = self._P_interpolator[Loc.CHANNEL]
-        ri = self._P_interpolator[Loc.RIGHT]
-        return np.array(
-            [
-                le.eval(wl) if le else 0,
-                ch.eval(wl - self.min_bed_level) if ch else 0,
-                ri.eval(wl) if ri else 0,
-            ]
-        )
 
     def _P(self, wl: float, loc: Loc):
         """Wetted perimeter for given water level."""
         return sum(p for _, p, _, _ in self._wetted_segments(wl, loc))
-
-    def calc_nf(self, wl: float):
-        """Return form roughness for the wetted cross-section.
-
-        formrf * sum_k (r_k * p_k) / P
-
-        formrf is the default form roughness of cross-section
-        rk and pk are relative roughness and wetted perimeter
-        P is the wetted perimeter
-
-        Returns
-        -------
-        np.array
-            [nf in left, nf in channel, nf in right]
-        """
-        le = self._nf_interpolator[Loc.LEFT]
-        ch = self._nf_interpolator[Loc.CHANNEL]
-        ri = self._nf_interpolator[Loc.RIGHT]
-        return np.array(
-            [
-                le.eval(wl) if le else 0,
-                ch.eval(wl - self.min_bed_level) if ch else 0,
-                ri.eval(wl) if ri else 0,
-            ]
-        )
 
     def _nf(self, wl: float, loc: Loc):
         """Return form roughness for the wetted cross-section.
@@ -471,56 +453,3 @@ class CrossSection:
 
         # don't need to multiply by formrf since roughness already done that
         return weighted_p / peri if peri != 0 else 0
-
-    def calc_conveyance(self, A: np.array, P: np.array, nf: np.array, ng: np.array):
-        """Calculate conveyance using known A, P, nf, ng
-
-        Parameters
-        ----------
-        A: np.array
-            area of left, channel and right
-
-        P: np.array
-            wetted periment of left, channel and right
-
-        nf: np.array
-            roughness of left, channel and right
-
-        ng: np.array
-            grain roughness of left, channel and right
-        """
-
-        mask = P != 0
-        K = np.sum(A[mask] * (A[mask] / P[mask]) ** (2 / 3) / (ng[mask] + nf[mask]))
-        assert K > 0, "No water"
-        return K
-
-    def calc_conveyance_using_wl(self, wl: float, ng):
-        """K conveyance
-
-        sum over left, main, right of
-            A * R^(2/3) / (ng + nf)
-
-        where
-            A is the area
-            R is A/P
-            ng is grain roughness
-            nf is form roughness
-
-        Parameters
-        ----------
-        wl: float
-            Water level
-
-        ng: np.array
-            grain roughness in left, channel, right
-
-        """
-        A = self.calc_area(wl)
-        P = self.calc_P(wl)
-        nf = self.calc_nf(wl)
-        return self.calc_conveyance(A, P, nf, ng)
-
-    # def R(self, wl: float):
-    #     """Hydraulic radius A/P over entire xsection"""
-    #     return self.area(wl, Loc.ALL) / self._P(wl, Loc.ALL)

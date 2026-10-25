@@ -51,7 +51,7 @@ def run_model(infile: pathlib.Path):
     print("done", flush=True)
 
     # using Sf/vel we can get gsv, this allows transport
-    chan.update_gsv(hmodel)
+    chan.update_gsv(hmodel._Sf, hmodel._vel)
 
     out = Output(cfg, hmodel, chan)
 
@@ -81,8 +81,8 @@ def run_model(infile: pathlib.Path):
                 do_sediment_transport = True
 
             if do_sediment_transport:
-                chan.update_gsv(hmodel)
-                chan.set_transport_rates()
+                chan.update_gsv(hmodel._Sf, hmodel._vel)
+                chan.set_transport_rates(hmodel.get_wl())
             if step % cfg.output.frequency == 0:
                 out.write_step(step, t)
             if do_sediment_transport:
