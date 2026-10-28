@@ -339,10 +339,16 @@ class Channel:
         # sediment rates at all chainages, nc x nbins x nlith
         bdy_sed_rate = self._cfg._processed_sediment_boundary.value_at(t)
 
+        # FIXME, check this
+
         # sediment transport rates
-        my_Qb_jli = self._trans_rate_jli + bdy_sed_rate
+        my_Qb_jli = self._trans_rate_jli
         up_Qb_jli = np.concatenate(
             [np.zeros_like(my_Qb_jli[:1]), my_Qb_jli[:-1]], axis=0
+        )
+        up_Qb_jli += bdy_sed_rate
+        my_Qb_jli += np.concatenate(
+            [bdy_sed_rate[1:], np.zeros_like(bdy_sed_rate[-1:])], axis=0
         )
 
         dc = np.diff(self._cs)
