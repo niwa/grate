@@ -7,6 +7,7 @@ from grainprofile import (
     get_representative_grain_sizes,
     get_grain_size_bin_uppers,
 )
+from storage_layers import StorageLayers
 
 SAND_SIZE = -np.log(0.002)  # sand grain size in phi units
 KAPPA = 0.4  # Von Karman's constant
@@ -47,6 +48,8 @@ class Channel:
         self._rgsizes = get_representative_grain_sizes(gs.grain_size_cfds)
         self._uppersizes = get_grain_size_bin_uppers(gs.grain_size_cfds)
         self._phi = -np.log(self._uppersizes)
+        self._bedrock = np.array([xs.bedrock_rl for xs in xss], dtype=np.float64)
+        self._bedrock = np.nan_to_num(self._bedrock, nan=-np.inf)
 
         # these should get updated at sediment transport aggradation
         self._min_bed_level = np.array([xs.min_bed_level for xs in xss])
@@ -62,8 +65,20 @@ class Channel:
         self._dsm = np.empty(self._nc)
         self._d90 = np.empty((self._nc, 3))
         self._ng = np.empty((self._nc, 3))
+
         self._aprop = np.array([xs._aprop.copy() for xs in xss])  # (nc, nbins, nlith)
-        self._sprop = np.array([xs._sprop.copy() for xs in xss])  # (nc, nbins, nlith)
+        self._athickness = np.minimum(
+            self._min_bed_level - self._bedrock, self.alayer_max_thickness
+        )
+
+        # FIXME
+        # print(self._bedrock)
+        # print(self._min_bed_level)
+        # print(self._athickness)
+
+        self._storage_layers = StorageLayers(
+            cfg, xss, self._min_bed_level - self._bedrock - self._athickness
+        )
 
         # the profile interpolators for A, P, Bwet, and nf
         self._profile_tabs = [
@@ -129,6 +144,40 @@ class Channel:
     def get_min_bed_level(self):
         """Return deepest part of the cross-section"""
         return self._min_bed_level
+
+    def get_layer_thickness(self):
+        """Return thickness of active and storage for chainages
+
+        Returns
+        -------
+        np.array
+            (nc, 1 + num_slayers).  The first layer is active layer, then top
+            storage etc.  Any layer
+            can have zero thickness, and if the wl is close to the bedrock the
+            lower storage layers often do have zero thickness.  The lowest
+            storage layer can have inf thickness.  Storage layers that don't
+            exist have NaN thickness
+        """
+        return np.column_stack([self._athickness, self._storage_layers.get_thickness()])
+
+    def get_layer_composition(self):
+        """Return active and storage layer proportions
+
+        Returns:
+        -------
+        np.array
+            (nc, 1 + num_slayers, nbin, nlith)
+            The first layer is the active layer, then storage layers from the
+            top down.  Storage layers that don't exist are filled with zeros.
+        """
+
+        return np.concatenate(
+            [self._aprop[:, None, :, :], self._storage_layers.get_sprop()], axis=1
+        )
+
+    def get_bedrock(self):
+        """Return bedrock elevation for each chainage"""
+        return self._bedrock
 
     def calc_area(self, c: int, wl: float):
         """Return area of water between bed and wl"""
@@ -219,11 +268,16 @@ class Channel:
         K = np.sum(
             A[mask] * (A[mask] / P[mask]) ** (2 / 3) / (self._ng[c, mask] + nf[mask])
         )
-        assert K > 0, "No water"
+        assert K > 0, (
+            f"K=0 at c={c}, wl={wl}, A={A}, P={P}, nf={nf}, ng={self._ng[c]}, min_bed_level={self._min_bed_level[c]}"
+        )
         return K
 
     def set_transport_rates(self, wl):
-        """Set the bed material transport rate for all chaianges"""
+        """Set the bed material transport rate for all chaianges
+
+        m^3/s
+        """
 
         Bwet = np.array([self._calc_Bwet(c, w) for c, w in zip(range(self._nc), wl)])
         self._trans_rate_jli[:] = self.qb_jli() * Bwet[:, None, None]
@@ -240,7 +294,15 @@ class Channel:
         """Wilcock & Crowe (2003) eq 9.33 for every chainage at once.
 
         Returns (nc, nbins, nlith), per unit width (multiply by Bwet outside).
+
+        Volumetric bed-load transport rate per unit width
+        m^3/s / m
         """
+
+        # # FIXME
+        # if any(self._sand_fraction < 0):
+        #     print("Sand fraction", self._sand_fraction)
+        #     print(self._aprop[1])
 
         with np.errstate(over="raise"):
             phirm = 0.021 + 0.015 * np.exp(-20 * self._sand_fraction)  # (nc,)
@@ -256,7 +318,13 @@ class Channel:
         tau_rj = tau_rm[:, None, :] * (ratio**b)[:, :, None]  # (nc, nbins, nlith)
 
         phi = (WATER_DENSITY * gsv**2) / tau_rj  # (nc, nbins, nlith)
-        q = self._aprop * gsv**3 / (s - 1) / GRAVITY  # (nc, nbins, nlith)
+        q = (
+            self._aprop
+            * (self._athickness[:, None, None] / self.alayer_max_thickness)
+            * gsv**3
+            / (s - 1)
+            / GRAVITY
+        )  # (nc, nbins, nlith)
 
         # np.where would evaluate both branches everywhere (nan/overflow
         # warnings), so fill through a mask
@@ -271,20 +339,18 @@ class Channel:
         # sediment rates at all chainages, nc x nbins x nlith
         bdy_sed_rate = self._cfg._processed_sediment_boundary.value_at(t)
 
-        # FIXME
-        # print(0, bdy_sed_rate)
-
         # sediment transport rates
+        # FIXME, when c = 0:
+        # up_Qb_jli = bdy_sed_rate[:-1]
+        # my_Qb_jli = self._trans_rate_jli[1:]
+
+        # print(bdy_sed_rate[0])
+
         up_Qb_jli = self._trans_rate_jli[:-1] + bdy_sed_rate[:-1]
         my_Qb_jli = self._trans_rate_jli[1:]
 
-        # print(1, my_Qb_jli)
-
         dc = np.diff(self._cs)
         fact = 1.0 / dc / (1 - self.poro) / self._Bchan[1:]
-
-        # print(2, dc)
-        # print(3, fact)
 
         # dy by dt to figure out next dt
         dydt = fact * (up_Qb_jli.sum(axis=(1, 2)) - my_Qb_jli.sum(axis=(1, 2)))
@@ -295,35 +361,54 @@ class Channel:
         fact *= self._dt
         dy = dydt * self._dt
 
-        # print(4, fact)
-        # print(5, dy)
+        # unitless ratio of transport of a particular fraction relative to all
+        p = np.zeros_like(my_Qb_jli)
+        denom = my_Qb_jli.sum(axis=(1, 2))[:, None, None]
+        np.divide(my_Qb_jli, denom, out=p, where=denom != 0)
 
-        # Vectorise the sediment proportions and flux differences.
-        p = my_Qb_jli / my_Qb_jli.sum(axis=(1, 2))[:, None, None]
-        flux_diff = (up_Qb_jli - my_Qb_jli) * fact[:, None, None]
-
-        # print(6, p)
-        # print(7, flux_diff)
+        # units are m^3 / s  times s / m^2 = m
+        dy_jli = (up_Qb_jli - my_Qb_jli) * fact[:, None, None]
 
         # aggrade/degrade cross-section channel
         self._min_bed_level[1:] += dy
         self._mean_bed_level[1:] += dy
 
-        # print(8, self._min_bed_level)
-        # print(9, self._mean_bed_level)
+        # available change in active thickness (nc-1, )
+        space = np.where(
+            dy >= 0,
+            np.maximum(self.alayer_max_thickness - self._athickness[1:], 0),
+            np.maximum(self._athickness[1:], 0),
+        )
 
-        f_int = self.f_interface(dy > 0, p)
-        df = (
-            flux_diff - f_int * dy[:, None, None]
-        ) / self._cfg.morphological.alayer_max_thickness
+        # change that will occur in active layer (nc-1, )
+        change_alayer = np.sign(dy) * np.minimum(space, np.abs(dy))
 
-        # print(f_int)
-        # print(df)
-        # print(self._aprop)
-        self._aprop[1:] += df
-        # print(self._aprop)
+        # remaining must change storage layer (nc-1, ), same sign as dy
+        shift_alayer = dy - change_alayer
 
-        # print(10, self._aprop[1:])
+        # FIXME
+        # print(f"dy\n{dy}\nChange alayer\n{change_alayer}\nshift alayer\n{shift_alayer}\nmin_bed_level\n{self._min_bed_level}")
+        # print(f"min_bed_level\n{self._min_bed_level[1]}")
+
+        # change thickness and proportion in active where final thickness not 0
+        # The denom can be 0 when no active layer and degrading
+        f_int = self.f_interface(shift_alayer > 0, p)
+        denom = self._athickness[1:][:, None, None] + change_alayer[:, None, None]
+        numer = (
+            self._aprop[1:] * self._athickness[1:][:, None, None]
+            + dy_jli
+            - self.f_interface(shift_alayer > 0, p) * shift_alayer[:, None, None]
+        )
+        np.divide(numer, denom, out=self._aprop[1:], where=denom != 0)
+
+        # shift in y must go into storage layer (nc-1, )
+        self._storage_layers.update(f_int, shift_alayer)
+
+        # df = (
+        #     dy_jli - f_int * dy[:, None, None]
+        # ) / self._cfg.morphological.alayer_max_thickness
+        #
+        # self._aprop[1:] += df
 
         # scfd top storage layer = (scfd top storage layer * top storage layer thickness + xss[c].f_interface(dy > 0, p) * dy) / (scfd top storage layer thickness + dy)
         # scfd top storage thickness += dy
@@ -334,21 +419,28 @@ class Channel:
         # now we can update all the cache variables
         self.set_grain_arrays()
 
-        # import sys
-        #
-        # sys.exit(0)
-
     def f_interface(self, aggrading, p):
-        """Interface distribution (how much moves INTO the active layer).
+        """Interface distribution
+
+        We subtract this from what moves INTO active layer
 
         aggrading: (n,) bool
         p: (n, nbins, nlith)
+
+        NB: When degrading more than is available in top storage layer, this
+        function returns incorrect value, we should return a combination of
+            self._storage_layers.get_top_sprop()[1:],
+        and
+            self._storage_layers.get_below_top_sprop()[1:],
+
+        Currently we will get a small mass balance error
+
         """
         aggrading = np.asarray(aggrading)[:, None, None]
         return np.where(
             aggrading,
             self.chi * self._aprop[1:] + (1 - self.chi) * p,
-            self._sprop[1:],
+            self._storage_layers.get_top_sprop()[1:],
         )
 
     def set_grain_arrays(self):

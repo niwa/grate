@@ -163,6 +163,7 @@ class TestRuntimeDownstreamBoundary:
 class TestRuntimeSedimentBoundaries:
     @pytest.fixture
     def ordinates(self):
+        """[4, 7) [7, 9) [9, inf)"""
         return [4.0, 7.0, 9.0]
 
     @pytest.fixture
@@ -211,6 +212,17 @@ class TestRuntimeSedimentBoundaries:
 
     def test_rechainage_exact_matches(self, constant_boundaries):
         bc = constant_boundaries
+        """
+               [3, 4)    0
+               [4, 5)   10
+               [5, 6)    0
+               [6, 7)    0
+               [7, 8)   20
+               [8, 9)    0
+              [9, 10)   30
+             [10, 11)    0
+             [11, inf)   0
+        """
         bc.rechainage([3, 4, 5, 6, 7, 8, 9, 10, 11])
 
         np.testing.assert_array_equal(
@@ -220,11 +232,30 @@ class TestRuntimeSedimentBoundaries:
 
     def test_rechainage_moves_inputs_downstream(self, constant_boundaries):
         bc = constant_boundaries
+        """
+               [3, 3.9)    0
+               [3.9, 5)   10
+               [5, 6)      0
+               [6, 7)      0
+               [7, 8.9)   20
+               [8.9, 9.2) 30
+               [9.2, inf)  0
+        """
         bc.rechainage([3, 3.9, 5, 6, 7, 8.9, 9.2])
 
         np.testing.assert_array_equal(
             self.get_inputs(bc),
             [0, 0, 10, 0, 20, 0, 30],
+            # [0, 10, 0, 0, 20, 30, 0],
+        )
+
+    def test_rechainage_add_internal(self, constant_boundaries):
+        bc = constant_boundaries
+        bc.rechainage([4, 4.1, 6.9, 7, 8, 9])
+
+        np.testing.assert_array_equal(
+            self.get_inputs(bc),
+            [10, 0, 0, 20, 0, 30],
         )
 
     def test_rechainage_sums_inputs_at_same_chainage(self, constant_boundaries):

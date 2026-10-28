@@ -22,6 +22,7 @@ class Output:
             cfg.grain_size_profiles.grain_size_cfds
         )
         self._nlith = cfg.grain_size_profiles.num_lith
+        self._nlayers = 1 + cfg.morphological.num_slayers
         self._outfile = cfg.output.fname
 
         data_funs = {
@@ -39,6 +40,9 @@ class Output:
             "transport_rate": self._get_transport_rate,
             "mean_bed_level": self._get_mean_bed_level,
             "min_bed_level": self._get_min_bed_level,
+            "layer_thickness": self._get_layer_thickness,
+            "layer_composition": self._get_layer_composition,
+            "bedrock": self._get_bedrock,
         }
 
         # map user variable name to method for producing that DataArray
@@ -211,6 +215,47 @@ class Output:
             dims=("chainage",),
             coords={"chainage": self._cs},
             name="min_bed_level",
+        )
+
+    def _get_layer_thickness(self):
+        return self._chan.get_layer_thickness()
+
+    def get_layer_thickness(self):
+        return xr.DataArray(
+            self._get_layer_thickness(),
+            dims=("chainage", "layer"),
+            coords={
+                "chainage": self._cs,
+                "layer": np.arange(self._nlayers, dtype=np.uint32),
+            },
+            name="layer_thickness",
+        )
+
+    def _get_layer_composition(self):
+        return self._chan.get_layer_composition()
+
+    def get_layer_composition(self):
+        return xr.DataArray(
+            self._get_layer_composition(),
+            dims=("chainage", "layer", "rel_grain_sizes", "lith"),
+            coords={
+                "chainage": self._cs,
+                "layer": np.arange(self._nlayers, dtype=np.uint32),
+                "rel_grain_sizes": self._rgsizes,
+                "lith": np.arange(self._nlith, dtype=np.uint32),
+            },
+            name="layer_composition",
+        )
+
+    def _get_bedrock(self):
+        return self._chan.get_bedrock()
+
+    def get_bedrock(self):
+        return xr.DataArray(
+            self._get_bedrock(),
+            dims=("chainage",),
+            coords={"chainage": self._cs},
+            name="bedrock",
         )
 
     def write_step(self, step: int, t: dt.datetime):

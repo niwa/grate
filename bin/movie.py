@@ -1,5 +1,6 @@
 import argparse
 import pathlib
+import numpy as np
 
 import matplotlib
 
@@ -58,18 +59,45 @@ def _prepare_movie_data(ds: xr.Dataset, var: str, xdim: str, sels: dict[str, int
         data[v] = da.transpose("time", xdim)
 
     # get the x values
-    # first = data[vnames[0]]
-    # if xdim in first.coords:
     x = data[vnames[0]][xdim].values
-    # else:
-    #     x = np.arange(first.sizes[xdim])
 
     """special case if var is elev.  plot min_bed_level and water_level"""
     if var == "elev":
         plot_data = [
-            ("min_bed_level", data["min_bed_level"]),
             ("water_level", data["water_level"]),
+            ("min_bed_level", data["min_bed_level"]),
         ]
+
+        # possibly restrict dim
+        layers = ds["layer_thickness"]
+        for dim, index in sels.items():
+            if dim in layers.dims:
+                layers = layers.isel({dim: index})
+
+        # nans mean layer missing, make it 0 for plotting
+        thickness = layers.fillna(0).values
+
+        # don't plot inf layers or those below
+        invalid_below = np.maximum.accumulate(np.isinf(thickness), axis=2)
+
+        # elevation of the bottom of each layer
+        elevations = data["min_bed_level"].values[:, :, None] - np.cumsum(
+            thickness, axis=2
+        )
+
+        # so they won't be plotted
+        elevations[invalid_below] = np.nan
+
+        for i in range(layers.sizes["layer"]):
+            da = xr.DataArray(
+                elevations[:, :, i],
+                dims=("time", xdim),
+                coords={
+                    "time": layers["time"],
+                    xdim: layers[xdim],
+                },
+            )
+            plot_data.append((f"layer_{i}", da))
     else:
         plot_data = [(var, data[var])]
 

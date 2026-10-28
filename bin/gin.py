@@ -463,6 +463,9 @@ class OutputOptions(GrateBase):
                 "transport_rate",
                 "mean_bed_level",
                 "min_bed_level",
+                "bedrock",  # doesn't change over time so a bit wasteful to appear in output, but is small
+                "layer_thickness",
+                "layer_composition",
             ]
         ]
     ) = p.Field(default_factory=list)
@@ -535,6 +538,9 @@ class GrateConfig(GrateBase):
                 "transport_rate",
                 "mean_bed_level",
                 "min_bed_level",
+                "bedrock",  # doesn't change over time so a bit wasteful to appear in output, but is small
+                "layer_thickness",
+                "layer_composition",
             ]
 
     def _check_unit_changes(self):
@@ -551,6 +557,10 @@ class GrateConfig(GrateBase):
     def _check_discretisation(self):
         if self.discretisation.chainage_min >= self.discretisation.chainage_max:
             raise ValueError("chainage_min must be less than chainage_max")
+        if self.simulation_time.cdt >= self.morphological.alayer_max_thickness:
+            raise ValueError("cdt must be less than alayer_max_thickness")
+        if self.simulation_time.cdt >= self.morphological.slayer_max_thickness:
+            raise ValueError("cdt must be less than slayer_max_thickness")
 
     def _check_cross_sections(self):
         # if self.model.channel_type == "flume" and self.cross_sections.wallrf is None:
@@ -673,6 +683,9 @@ class GrateConfig(GrateBase):
 
         if len({b.ordinate for b in boundaries}) != len(boundaries):
             raise ValueError("Sediment boundary ordinates must be unique")
+
+        # FIXME, sediment bc needs to include top chainage and exclude next one
+        # time
 
         # each bc is either a consant (nbins, nlith) 2d array, or a dataframe
         # containing flattened values for each timestep
