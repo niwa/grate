@@ -340,17 +340,14 @@ class Channel:
         bdy_sed_rate = self._cfg._processed_sediment_boundary.value_at(t)
 
         # sediment transport rates
-        # FIXME, when c = 0:
-        # up_Qb_jli = bdy_sed_rate[:-1]
-        # my_Qb_jli = self._trans_rate_jli[1:]
-
-        # print(bdy_sed_rate[0])
-
-        up_Qb_jli = self._trans_rate_jli[:-1] + bdy_sed_rate[:-1]
-        my_Qb_jli = self._trans_rate_jli[1:]
+        my_Qb_jli = self._trans_rate_jli + bdy_sed_rate
+        up_Qb_jli = np.concatenate(
+            [np.zeros_like(my_Qb_jli[:1]), my_Qb_jli[:-1]], axis=0
+        )
 
         dc = np.diff(self._cs)
-        fact = 1.0 / dc / (1 - self.poro) / self._Bchan[1:]
+        dc = np.insert(dc, 0, dc[0])
+        fact = 1.0 / dc / (1 - self.poro) / self._Bchan
 
         # dy by dt to figure out next dt
         dydt = fact * (up_Qb_jli.sum(axis=(1, 2)) - my_Qb_jli.sum(axis=(1, 2)))
@@ -370,20 +367,20 @@ class Channel:
         dy_jli = (up_Qb_jli - my_Qb_jli) * fact[:, None, None]
 
         # aggrade/degrade cross-section channel
-        self._min_bed_level[1:] += dy
-        self._mean_bed_level[1:] += dy
+        self._min_bed_level += dy
+        self._mean_bed_level += dy
 
-        # available change in active thickness (nc-1, )
+        # available change in active thickness (nc, )
         space = np.where(
             dy >= 0,
-            np.maximum(self.alayer_max_thickness - self._athickness[1:], 0),
-            np.maximum(self._athickness[1:], 0),
+            np.maximum(self.alayer_max_thickness - self._athickness, 0),
+            np.maximum(self._athickness, 0),
         )
 
-        # change that will occur in active layer (nc-1, )
+        # change that will occur in active layer (nc, )
         change_alayer = np.sign(dy) * np.minimum(space, np.abs(dy))
 
-        # remaining must change storage layer (nc-1, ), same sign as dy
+        # remaining must change storage layer (nc, ), same sign as dy
         shift_alayer = dy - change_alayer
 
         # FIXME
@@ -393,15 +390,15 @@ class Channel:
         # change thickness and proportion in active where final thickness not 0
         # The denom can be 0 when no active layer and degrading
         f_int = self.f_interface(shift_alayer > 0, p)
-        denom = self._athickness[1:][:, None, None] + change_alayer[:, None, None]
+        denom = self._athickness[:, None, None] + change_alayer[:, None, None]
         numer = (
-            self._aprop[1:] * self._athickness[1:][:, None, None]
+            self._aprop * self._athickness[:, None, None]
             + dy_jli
             - self.f_interface(shift_alayer > 0, p) * shift_alayer[:, None, None]
         )
-        np.divide(numer, denom, out=self._aprop[1:], where=denom != 0)
+        np.divide(numer, denom, out=self._aprop, where=denom != 0)
 
-        # shift in y must go into storage layer (nc-1, )
+        # shift in y must go into storage layer (nc, )
         self._storage_layers.update(f_int, shift_alayer)
 
         # df = (
@@ -439,8 +436,8 @@ class Channel:
         aggrading = np.asarray(aggrading)[:, None, None]
         return np.where(
             aggrading,
-            self.chi * self._aprop[1:] + (1 - self.chi) * p,
-            self._storage_layers.get_top_sprop()[1:],
+            self.chi * self._aprop + (1 - self.chi) * p,
+            self._storage_layers.get_top_sprop(),
         )
 
     def set_grain_arrays(self):

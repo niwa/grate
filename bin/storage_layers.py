@@ -166,18 +166,18 @@ class StorageLayers:
         Parameters
         ----------
         f_int: np.array
-            Shape is (nc-1, nbins, nlith).
+            Shape is (nc, nbins, nlith).
 
         dy: np.array
-            Shape is (nc-1,)
+            Shape is (nc,)
         """
 
-        for c in range(1, len(self._sprop)):
-            change = dy[c - 1]
+        for c in range(len(self._sprop)):
+            change = dy[c]
 
             if abs(change) > self.max_thick:
                 warnings.warn(
-                    f"dy[{c - 1}]={change} exceeds the allowed range "
+                    f"dy[{c}]={change} exceeds the allowed range "
                     f"(-{self.max_thick}, {self.max_thick}); capping it."
                 )
                 change = np.clip(change, -self.max_thick, self.max_thick)
@@ -197,7 +197,7 @@ class StorageLayers:
                     #     f"Aggrading with fill at {c}, fill is {fill}, thickness is {self._thickness[c, i]}"
                     # )
                     s = self._sprop[c, i]
-                    s[:] = (s * thick + f_int[c - 1] * fill) / (thick + fill)
+                    s[:] = (s * thick + f_int[c] * fill) / (thick + fill)
                     self._thickness[c, i] = thick + fill
                     change -= fill
                     # print(f"done thickening, now {self._thickness[c, i]}")
@@ -205,7 +205,7 @@ class StorageLayers:
                 # remaining aggradation forms new top layer
                 if change > 0:
                     self.add_top_layer(c, change)
-                    self._sprop[c, self._head[c]] = f_int[c - 1].copy()
+                    self._sprop[c, self._head[c]] = f_int[c].copy()
                     # FIXME
                     # print(
                     #     f"Aggrading at {c}, made a new top layer with {change}, its thickness is {self._thickness[c, self._head[c]]}"
