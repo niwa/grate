@@ -9,7 +9,6 @@ import numpy as np
 from gin import GrateConfig
 from channel import River, BraidedChannel
 from hydrodynamics_models import QuasiSteadyModel, DynamicWaveModel
-from cross_section import Loc
 
 
 def prep_model(infile: pathlib.Path, odir: pathlib.Path):
@@ -101,54 +100,52 @@ def prep_model(infile: pathlib.Path, odir: pathlib.Path):
         bchan=chan._Bchan,  # (nc, )
         min_bed_level=chan.get_min_bed_level(),  # (nc, )
         mean_bed_level=chan.get_mean_bed_level(),  # (nc, )
+        bedrock=chan.get_bedrock(),  # (nc, )
     )
 
-    # interpolator tables for each cross-section
     for name in ("area", "P", "Bwet", "nf"):
         tabs = {}
-        for i, xs in enumerate(chan._xss):
-            for j, loc in enumerate((Loc.LEFT, Loc.CHANNEL, Loc.RIGHT)):
-                ip = getattr(xs, f"_{name}_interpolator")[loc]
-                if ip is not None:
-                    tabs[f"{i}_{j}"] = ip.get_np()
+        for i, ts in enumerate(chan._profile_tabs):
+            left, channel, right = ts[name]
+            if left:
+                tabs[f"{i}_{0}"] = left.get_np()
+            if channel:
+                tabs[f"{i}_{1}"] = channel.get_np()
+            if right:
+                tabs[f"{i}_{2}"] = right.get_np()
         fname = odir / f"{name}_tabs.npz"
         print(f"Writing {fname}")
         np.savez(fname, **tabs)
 
-    # print(chan._xss[44]._P_interpolator[Loc.CHANNEL].xs)
-    # print(chan._xss[44]._P_interpolator[Loc.CHANNEL].fs)
-    #
-    # np.set_printoptions(precision=17)
-    # xs = np.asarray(chan._xss[44]._P_interpolator[Loc.CHANNEL].xs)
-    # fs = np.asarray(chan._xss[44]._P_interpolator[Loc.CHANNEL].fs)
-    # print("xs:", xs)
-    # print("fs:", fs)
-    # x = 0.43
-    # print("x:", repr(x))
-    # print("np.interp:", np.interp(x, xs, fs))
-
     # layer grain props
     fname = odir / "grain.npz"
     print(f"Writing {fname}")
+
+    sthickness = chan._storage_layers.get_thickness().copy()
+    sthickness[np.isnan(sthickness)] = 0.0
+    sprop = chan._storage_layers.get_sprop().copy()
+    sprop[np.isnan(sprop)] = 0.0
+
     np.savez(
         fname,
-        aprop=chan._layers.aprop,  # (nc, nbins, nlith)
-        sprop=chan._layers.sprop,  # (nc, nlayer, nbins, nlith)
-        athickness=chan._layers.athickness,  # (nc,)
-        sthickness=chan._layers.sthickness,  # (nc, nlayer)
-        rgsizes=chan._layers.rgsizes,  # (nbins, )
-        uppersizes=chan._layers.uppersizes,  # (nbins, )
-        sediment_densities=chan._layers.sediment_densities,  # (nprofiles,)
+        athickness=chan._athickness,  # (nc,)
+        sthickness=sthickness,  # (nc, nlayer)
+        aprop=chan._aprop,  # (nc, nbins, nlith)
+        sprop=sprop,  # (nc, nlayer, nbins, nlith)
+        rgsizes=chan._rgsizes,  # (nbins, )
+        uppersizes=chan._uppersizes,  # (nbins, )
+        sediment_densities=chan._sediment_densities,  # (nprofiles,)
         bankd90=chan._bankd90,  # (nc, ) where nan use channel d90
     )
 
     kv["morphological"] = {
-        "la": cfg.morphological.la,
         "poro": cfg.morphological.poro,
         "chi": cfg.morphological.chi,
         "beta": cfg.morphological.beta,
         "qthres": cfg.morphological.qthres,
         "qthres_dtmultiplier": cfg.morphological.qthres_dtmultiplier,
+        "alayer_max_thick": cfg.morphological.alayer_max_thickness,
+        "slayer_max_thick": cfg.morphological.slayer_max_thickness,
     }
     kv["simulation_time"] = {
         "start": cfg.simulation_time.start.replace(tzinfo=dt.timezone.utc).timestamp(),

@@ -122,9 +122,7 @@ class StorageLayers:
     def add_top_layer(self, c, new_thickness):
         """Insert a new empty top layer at chainage c."""
 
-        # print(f"Making new storage layer at {c}")
-        # print(self)
-
+        assert self.nlayers > 1, f"Cannot add layer when max num is {self.nlayers}"
         old_head = self._head[c]
         new_head = (old_head - 1) % self.nlayers
 
@@ -189,18 +187,21 @@ class StorageLayers:
                 # aggradation: fill the existing top layer first
                 i = self._head[c]
                 thick = self._thickness[c, i]
-                fill = min(change, max(self.max_thick - thick, 0.0))
+
+                # if only one layer, it must accept all change
+                if self.nlayers == 1:
+                    fill = change
+                else:
+                    # if thick is inf, then fill will be -inf, so we will add layer
+                    fill = min(change, self.max_thick - thick)
 
                 if fill > 0:
-                    # FIXME
-                    # print(
-                    #     f"Aggrading with fill at {c}, fill is {fill}, thickness is {self._thickness[c, i]}"
-                    # )
-                    s = self._sprop[c, i]
-                    s[:] = (s * thick + f_int[c] * fill) / (thick + fill)
+                    # only update composition if not inf
+                    if not np.isinf(thick):
+                        s = self._sprop[c, i]
+                        s[:] = (s * thick + f_int[c] * fill) / (thick + fill)
                     self._thickness[c, i] = thick + fill
                     change -= fill
-                    # print(f"done thickening, now {self._thickness[c, i]}")
 
                 # remaining aggradation forms new top layer
                 if change > 0:

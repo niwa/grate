@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use chrono::DateTime;
-use ndarray::{Array1, Array3, Axis};
+use ndarray::{Array1, Array2, Array3, Array4, Axis};
 use netcdf::{VariableMut, FileMut};
 
 use crate::channel::Channel;
@@ -35,6 +35,9 @@ pub enum Variable {
     TransportRate,
     MeanBedLevel,
     MinBedLevel,
+    LayerThickness,
+    LayerComposition,
+    Bedrock,
 }
 
 impl Variable {
@@ -48,6 +51,8 @@ impl Variable {
         match self {
             Dt | Timestep => &["time"],
             CumTransport | TransportRate => &["time", "chainage", "rel_grain_sizes", "lith"],
+            LayerThickness => &["time", "chainage", "layer"],
+            LayerComposition => &["time", "chainage", "layer", "rel_grain_sizes", "lith"],
             _ => &["time", "chainage"],
         }
     }
@@ -58,12 +63,13 @@ impl Variable {
     }
 
     /// Time-blocked chunk shape: `block` steps of time, everything else whole.
-    pub fn chunks(&self, nc: usize, nbins: usize, nlith: usize) -> Vec<usize> {
+    pub fn chunks(&self, nc: usize, nlayer: usize, nbins: usize, nlith: usize) -> Vec<usize> {
         self.dims()
             .iter()
             .map(|&d| match d {
                 "time" => TIME_BLOCK,
                 "chainage" => nc,
+                "layer" => nlayer + 1,      // for the active + storage
                 "rel_grain_sizes" => nbins,
                 "lith" => nlith,
                 _ => unreachable!("unknown dimension {d}"),
@@ -82,9 +88,21 @@ fn put1(var: &mut VariableMut<'_>, a: &Array1<f64>, n: usize) -> Result<()> {
     Ok(())
 }
 
+fn put2(var: &mut VariableMut<'_>, a: &Array2<f64>, n: usize) -> Result<()> {
+    let a = a.as_standard_layout();
+    var.put_values(a.as_slice().unwrap(), (n..n + 1, .., ..))?;
+    Ok(())
+}
+
 fn put3(var: &mut VariableMut<'_>, a: &Array3<f64>, n: usize) -> Result<()> {
     let a = a.as_standard_layout();
     var.put_values(a.as_slice().unwrap(), (n..n + 1, .., .., ..))?;
+    Ok(())
+}
+
+fn put4(var: &mut VariableMut<'_>, a: &Array4<f64>, n: usize) -> Result<()> {
+    let a = a.as_standard_layout();
+    var.put_values(a.as_slice().unwrap(), (n..n + 1, .., .., .., ..))?;
     Ok(())
 }
 
@@ -97,11 +115,12 @@ fn total_over_grains(a: &Array3<f64>) -> Array1<f64> {
 // File creation
 // ---------------------------------------------------------------------------
 
-fn create_file(fname: &Path, epoch: usize, cs: &Array1<f64>, rgsizes: &Array1<f64>, nlith: usize, vars: &[Variable]) -> Result<FileMut> {
+fn create_file(fname: &Path, epoch: usize, cs: &Array1<f64>, rgsizes: &Array1<f64>, nlayer: usize, nlith: usize, vars: &[Variable]) -> Result<FileMut> {
     let mut file = netcdf::create(fname)?;
 
     file.add_unlimited_dimension("time")?;
     file.add_dimension("chainage", cs.len())?;
+    file.add_dimension("layer", nlayer + 1)?;       // + 1 for active
     file.add_dimension("rel_grain_sizes", rgsizes.len())?;
     file.add_dimension("lith", nlith)?;
 
@@ -124,6 +143,10 @@ fn create_file(fname: &Path, epoch: usize, cs: &Array1<f64>, rgsizes: &Array1<f6
         v.put_values(cs.as_slice().unwrap(), ..)?;
     }
     {
+        let mut v = file.add_variable::<u32>("layer", &["layer"])?;
+        v.put_values(&(0..=nlayer as u32).collect::<Vec<_>>(), ..)?;        // + 1 for active
+    }
+    {
         let mut v = file.add_variable::<f64>("rel_grain_sizes", &["rel_grain_sizes"])?;
         v.put_values(rgsizes.as_slice().unwrap(), ..)?;
     }
@@ -134,7 +157,7 @@ fn create_file(fname: &Path, epoch: usize, cs: &Array1<f64>, rgsizes: &Array1<f6
 
     // data variables
     for v in vars {
-        let chunks = v.chunks(cs.len(), rgsizes.len(), nlith);
+        let chunks = v.chunks(cs.len(), nlayer, rgsizes.len(), nlith);
 
         let mut var = match v {
             // timestep is an integer
@@ -191,6 +214,7 @@ impl Output {
             epoch,
             &cfg.cs,
             &cfg.rgsizes,
+            chan.nlayer,
             cfg.sediment_densities.len(),
             &variables,
         )?;
@@ -254,6 +278,13 @@ impl Output {
                 Variable::TotalTransportRate => {
                     put1(&mut var, &total_over_grains(chan.get_trans_rate_jli()), n)?
                 }
+                Variable::LayerThickness => {
+                    put2(&mut var, &chan.get_layer_thickness(), n)?
+                }
+                Variable::LayerComposition => {
+                    put4(&mut var, &chan.get_layer_composition(), n)?
+                }
+                Variable::Bedrock => put1(&mut var, chan.get_bedrock(), n)?,
             }
         }
 

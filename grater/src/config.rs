@@ -4,7 +4,7 @@ use std::fs::File;
 use anyhow::{Context, Result};
 use ndarray_npy::NpzReader;
 use saphyr::YamlOwned;
-use ndarray::{Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3, Array4};
 
 use crate::downstream::Downstream;
 use crate::utils::read_config;
@@ -16,9 +16,11 @@ pub struct Config {
     pub output: Output,
     pub cs: Array1<f64>,                            // (nc,)
     pub nc: usize,
+    pub nlayer: usize,
     pub bchan: Array1<f64>,                         // (nc,)
     pub min_bed_level: Array1<f64>,                 // (nc,)
     pub mean_bed_level: Array1<f64>,                // (nc,)
+    pub bedrock: Array1<f64>,                       // (nc,)
     pub bankd90: Array1<f64>,                       // (nc,)
     pub rgsizes: Array1<f64>,                       // (nbins,)
     pub uppersizes: Array1<f64>,                    // (nbins,)
@@ -26,8 +28,10 @@ pub struct Config {
     pub sediment: Option<InterpArray>,              // time, (nc, nbins, nlith), option so channel can take
     pub inflow: Option<InterpArray>,                // time, (nc, ), flow, option so hmodel can take
     pub downstream: Option<Downstream>,             // gives downstream flow, option so hmodel can take
-    pub acfd: Array3<f64>,                          // (nc, nbins, nlith)
-    pub scfd: Array3<f64>,                          // (nc, nbins, nlith)
+    pub aprop: Array3<f64>,                         // (nc, nbins, nlith)
+    pub sprop: Array4<f64>,                         // (nc, nlayers, nbins, nlith)
+    pub athickness: Array1<f64>,                    // (nc, )
+    pub sthickness: Array2<f64>,                    // (nc, nlayers)
     pub xstabs: Option<CrossSectionTabs>,           // (nc, ) four tables for each chainage, option so channel take
 }
 
@@ -45,7 +49,8 @@ pub struct CrossSectionTabs {
 }
 
 pub struct Morphological {
-    pub la: f64,
+    pub alayer_max_thick: f64,
+    pub slayer_max_thick: f64,
     pub beta: f64,
     pub chi: f64,
     pub poro: f64,
@@ -119,10 +124,13 @@ impl Config {
             nf: read_tabs(dir, "nf_tabs.npz", nc)?,
         };
 
+        let sprop = read_array4(&mut grain, "sprop");
+
         Ok(
             Self {
                 morphological: Morphological {
-                    la: number(morph, "la"),
+                    alayer_max_thick: number(morph, "alayer_max_thick"),
+                    slayer_max_thick: number(morph, "slayer_max_thick"),
                     beta: number(morph, "beta"),
                     chi: number(morph, "chi"),
                     poro: number(morph, "poro"),
@@ -142,9 +150,11 @@ impl Config {
                 },
                 cs: cs,
                 nc,
+                nlayer: sprop.shape()[1],
                 bchan: read_array1(&mut profiles, "bchan"),
                 min_bed_level: read_array1(&mut profiles, "min_bed_level"),
                 mean_bed_level: read_array1(&mut profiles, "mean_bed_level"),
+                bedrock: read_array1(&mut profiles, "bedrock"),
                 bankd90: read_array1(&mut grain, "bankd90"),
                 rgsizes: read_array1(&mut grain, "rgsizes"),
                 uppersizes: read_array1(&mut grain, "uppersizes"),
@@ -152,8 +162,10 @@ impl Config {
                 sediment: Some(InterpArray::new(&config_path(dir, "sediment.npz"), false)?),
                 inflow: Some(InterpArray::new(&config_path(dir, "inflow.npz"), false)?),
                 downstream: Some(Downstream::new(get(&yaml, "downstream"))?),
-                acfd: read_array3(&mut grain, "acfd"),
-                scfd: read_array3(&mut grain, "scfd"),
+                aprop: read_array3(&mut grain, "aprop"),
+                sprop: sprop,
+                athickness: read_array1(&mut grain, "athickness"),
+                sthickness: read_array2(&mut grain, "sthickness"),
                 xstabs: Some(tabs),
             }
         )
@@ -194,7 +206,17 @@ fn read_array1(npz: &mut NpzReader<File>, name: &str) -> Array1<f64> {
         .unwrap_or_else(|e| panic!("Failed to read '{name}': {e}"))
 }
 
+fn read_array2(npz: &mut NpzReader<File>, name: &str) -> Array2<f64> {
+    npz.by_name(name)
+        .unwrap_or_else(|e| panic!("Failed to read '{name}': {e}"))
+}
+
 fn read_array3(npz: &mut NpzReader<File>, name: &str) -> Array3<f64> {
+    npz.by_name(name)
+        .unwrap_or_else(|e| panic!("Failed to read '{name}': {e}"))
+}
+
+fn read_array4(npz: &mut NpzReader<File>, name: &str) -> Array4<f64> {
     npz.by_name(name)
         .unwrap_or_else(|e| panic!("Failed to read '{name}': {e}"))
 }

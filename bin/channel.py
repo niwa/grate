@@ -168,7 +168,7 @@ class Channel:
         np.array
             (nc, 1 + num_slayers, nbin, nlith)
             The first layer is the active layer, then storage layers from the
-            top down.  Storage layers that don't exist are filled with zeros.
+            top down.  Storage layers that don't exist are filled with nan.
         """
 
         return np.concatenate(
@@ -281,12 +281,12 @@ class Channel:
 
         Bwet = np.array([self._calc_Bwet(c, w) for c, w in zip(range(self._nc), wl)])
         self._trans_rate_jli[:] = self.qb_jli() * Bwet[:, None, None]
+
         # FIXME
-        # print(self.qb_jli())
-        # print(Bwet)
-        # print(self._trans_rate_jli)
+        # np.savetxt("/tmp/python_array.txt", self.qb_jli().ravel(), fmt="%.16e")
+        # np.savetxt("/tmp/python_array.txt", self._trans_rate_jli.ravel(), fmt="%.16e")
         # import sys
-        #
+
         # sys.exit(0)
         self._cum_transport += self._trans_rate_jli * self._dt
 
@@ -339,17 +339,12 @@ class Channel:
         # sediment rates at all chainages, nc x nbins x nlith
         bdy_sed_rate = self._cfg._processed_sediment_boundary.value_at(t)
 
-        # FIXME, check this
-
         # sediment transport rates
         my_Qb_jli = self._trans_rate_jli
         up_Qb_jli = np.concatenate(
             [np.zeros_like(my_Qb_jli[:1]), my_Qb_jli[:-1]], axis=0
         )
         up_Qb_jli += bdy_sed_rate
-        my_Qb_jli += np.concatenate(
-            [bdy_sed_rate[1:], np.zeros_like(bdy_sed_rate[-1:])], axis=0
-        )
 
         dc = np.diff(self._cs)
         dc = np.insert(dc, 0, dc[0])
@@ -363,6 +358,8 @@ class Channel:
         # now get the dys
         fact *= self._dt
         dy = dydt * self._dt
+
+        # np.savetxt("/tmp/python_array.txt", dy.ravel(), fmt="%.16e")
 
         # unitless ratio of transport of a particular fraction relative to all
         p = np.zeros_like(my_Qb_jli)
@@ -389,9 +386,7 @@ class Channel:
         # remaining must change storage layer (nc, ), same sign as dy
         shift_alayer = dy - change_alayer
 
-        # FIXME
-        # print(f"dy\n{dy}\nChange alayer\n{change_alayer}\nshift alayer\n{shift_alayer}\nmin_bed_level\n{self._min_bed_level}")
-        # print(f"min_bed_level\n{self._min_bed_level[1]}")
+        # print(f"{dy} {change_alayer} {shift_alayer}")
 
         # change thickness and proportion in active where final thickness not 0
         # The denom can be 0 when no active layer and degrading
@@ -403,6 +398,7 @@ class Channel:
             - self.f_interface(shift_alayer > 0, p) * shift_alayer[:, None, None]
         )
         np.divide(numer, denom, out=self._aprop, where=denom != 0)
+        self._athickness += change_alayer
 
         # shift in y must go into storage layer (nc, )
         self._storage_layers.update(f_int, shift_alayer)
@@ -413,11 +409,11 @@ class Channel:
         #
         # self._aprop[1:] += df
 
-        # scfd top storage layer = (scfd top storage layer * top storage layer thickness + xss[c].f_interface(dy > 0, p) * dy) / (scfd top storage layer thickness + dy)
-        # scfd top storage thickness += dy
+        # FIXME
+        np.savetxt("/tmp/python_array.txt", self._aprop.ravel(), fmt="%.16e")
+        # import sys
         #
-        # if top storage thickness would be > than morp.layerthicknes we have do something else
-        # FIXME, change storage layer f_jli
+        # sys.exit(0)
 
         # now we can update all the cache variables
         self.set_grain_arrays()

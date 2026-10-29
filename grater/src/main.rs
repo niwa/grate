@@ -8,6 +8,7 @@ use quasi_steady_state::QuasiSteadyState;
 use channel::Channel;
 use output::Output;
 
+mod storage_layers;
 mod output;
 mod channel;
 mod quasi_steady_state;
@@ -89,9 +90,9 @@ fn main() -> Result<()> {
             std::io::stdout().flush()?;
         }
 
+        step += 1;
         dt = channel.get_dt();
         t += dt;
-        step += 1;
 
 
     }

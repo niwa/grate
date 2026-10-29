@@ -1,8 +1,9 @@
 use anyhow::Result;
 use lambert_w::lambert_w0;
-use ndarray::{ArrayView1, Zip, Axis, Array1, Array2, Array3, Ix3};
+use ndarray::{concatenate, ArrayView1, Zip, Axis, Array1, Array2, Array3, Array4, Ix3};
 use crate::config::{Config, CrossSectionTab};
 use crate::interp_array::InterpArray;
+use crate::storage_layers::StorageLayers;
 
 const SAND_SIZE: f64 = 0.002;       // sand grain size in metres
 const GRAVITY: f64 = 9.81;
@@ -11,6 +12,7 @@ const WATER_DENSITY: f64 = 1000.0;
 
 pub struct Channel {
     nc: usize,
+    pub nlayer: usize,
 
     // time stepping
     dt: f64,
@@ -19,12 +21,13 @@ pub struct Channel {
     max_dydt: f64,
 
     sand_size: f64,                     // sand grain size in metres in phi units
-    morphla: f64,                       // self._cfg.morphological.la
+    alayer_max_thick: f64,              // self._cfg.morphological.alayar_max_thick
     chi: f64,                           // self._cfg.morphological.chi
     sediment_densities: Array1<f64>,    // (nlith, )
     min_bed_level: Array1<f64>,         // (nc, )
     mean_bed_level: Array1<f64>,        // (nc, )
-    fact: Array1<f64>,                  // (nc-1,), 1 / (cs[i + 1] - cs[i]) / (1 - poro) / bchan[i + 1]
+    bedrock: Array1<f64>,               // (nc, )
+    fact: Array1<f64>,                  // (nc,), 1 / (cs[i + 1] - cs[i]) / (1 - poro) / bchan[i + 1]
 
     sediment: InterpArray,
     ng: Array2<f64>,                    // (nc, 3)
@@ -38,13 +41,15 @@ pub struct Channel {
     d90: Array2<f64>,                   // (nc, 3 ) 90 percentile grain size left/channel/right
     bankd90: Array1<f64>,               // (nc, ) 90 percentile grain size on bank (if nan use channel)
     gsv: Array1<f64>,                   // (nc, ) 
-    acfd: Array3<f64>,                  // (nc, nbins, nlith)
-    scfd: Array3<f64>,                  // (nc, nbins, nlith)
+    aprop: Array3<f64>,                 // (nc, nbins, nlith) FIXME
                                         
     // transport arrays
     trans_rate_jli: Array3<f64>,        // (nc, nbins, nlith)
     cum_transport: Array3<f64>,         // (nc, nbins, nlith)
-                                        
+
+    athickness: Array1<f64>,            // (nc, )
+    storage_layers: StorageLayers,
+
     // caches for output, not sure we need these
     // bwet: Array1<f64>,               // (nc, )  this is needed for transport
     // area: Array2<f64>,               // (nc, 3)
@@ -62,13 +67,25 @@ impl Channel {
     pub fn new(cfg: &mut Config) -> Self {
         let xstabs = cfg.xstabs.take().unwrap();
         let fact: Array1<f64> = Array1::from_iter(
-            (0..cfg.nc - 1).map(|i| {
-                1.0 / (cfg.cs[i + 1] - cfg.cs[i]) / (1.0 - cfg.morphological.poro) / cfg.bchan[i + 1]
+            (0..cfg.nc).map(|i| {
+                let dc = if i > 0 {
+                    cfg.cs[i] - cfg.cs[i - 1]
+                } else {
+                    cfg.cs[1] - cfg.cs[0]
+                };
+                1.0 / dc / (1.0 - cfg.morphological.poro) / cfg.bchan[i]
             })
+        );
+        
+        let sl = StorageLayers::new(
+            cfg.morphological.slayer_max_thick,
+            cfg.sprop.clone(),
+            cfg.sthickness.clone(),
         );
 
         let mut chan = Self {
             nc: cfg.nc,
+            nlayer: cfg.nlayer,
 
             // time stepping
             dt: cfg.simulation_time.max_dt,
@@ -77,11 +94,12 @@ impl Channel {
             max_dydt: 0.1 * cfg.simulation_time.cdt / cfg.simulation_time.max_dt,
 
             sand_size: -SAND_SIZE.ln(),
-            morphla: cfg.morphological.la,
+            alayer_max_thick: cfg.morphological.alayer_max_thick,
             chi: cfg.morphological.chi,
             sediment_densities: cfg.sediment_densities.clone(),
             min_bed_level: cfg.min_bed_level.clone(),
             mean_bed_level: cfg.mean_bed_level.clone(),
+            bedrock: cfg.bedrock.clone(),
             fact: fact,
 
             sediment: cfg.sediment.take().unwrap(),
@@ -95,12 +113,14 @@ impl Channel {
             d90_channel: Array1::<f64>::ones(cfg.nc),
             bankd90: cfg.bankd90.clone(),
             gsv: Array1::<f64>::ones(cfg.nc),
-            acfd: cfg.acfd.clone(),
-            scfd: cfg.scfd.clone(),
+            aprop: cfg.aprop.clone(),
 
             // transport arrays
-            trans_rate_jli: Array3::<f64>::zeros(cfg.acfd.raw_dim()),
-            cum_transport: Array3::<f64>::zeros(cfg.acfd.raw_dim()),
+            trans_rate_jli: Array3::<f64>::zeros(cfg.aprop.raw_dim()),
+            cum_transport: Array3::<f64>::zeros(cfg.aprop.raw_dim()),
+    
+            athickness: cfg.athickness.clone(),
+            storage_layers: sl,
 
             // bwet: Array1::<f64>::zeros(cfg.nc),
             // area: Array2::<f64>::zeros((cfg.nc, 3)),
@@ -146,6 +166,43 @@ impl Channel {
 
     pub fn get_trans_rate_jli(&self) -> &Array3<f64> {
         &self.trans_rate_jli
+    }
+
+    ///  Return thickness of active and storage for chainages
+    ///
+    ///  (nc, 1 + num_slayers).  The first layer is active layer, then top
+    ///  storage etc.  Any layer
+    ///  can have zero thickness, and if the wl is close to the bedrock the
+    ///  lower storage layers often do have zero thickness.  The lowest real
+    ///  storage layer can have inf thickness.  Storage layers that don't
+    ///  exist have NaN thickness
+    pub fn get_layer_thickness(&self) -> Array2<f64> {
+        concatenate(
+            Axis(1),
+            &[
+                self.athickness.view().insert_axis(Axis(1)),
+                self.storage_layers.get_thickness().view(),
+            ],
+        ).unwrap()
+    }
+
+    /// Return active and storage layer proportions
+    ///
+    /// (nc, 1 + num_slayers, nbin, nlith)
+    /// The first layer is the active layer, then storage layers from the
+    /// top down.  Storage layers that don't exist are filled with nan.
+    pub fn get_layer_composition(&self) -> Array4<f64> {
+        concatenate(
+            Axis(1),
+            &[
+                self.aprop.view().insert_axis(Axis(1)),
+                self.storage_layers.get_sprop().view()
+            ],
+        ).unwrap()
+    }
+
+    pub fn get_bedrock(&self) -> &Array1<f64> {
+        &self.bedrock
     }
 
     pub fn calc_area(&self, c: usize, wl: f64) -> Array1<f64> {
@@ -204,11 +261,11 @@ impl Channel {
         k
     }
 
-    /// Set sand_fraction/dsm/d90/ng which depend on acfd
+    /// Set sand_fraction/dsm/d90/ng which depend on aprop
     fn set_grain_arrays(&mut self) {
 
         // sum over nlith axis, to get (nc, nbins), then cumsum down nbins axis
-        let cumf: Array2<f64> = cumf_lith(&self.acfd);
+        let cumf: Array2<f64> = cumf_lith(&self.aprop);
 
         // sand fraction for each chainage (nc, )
         cumf_smaller_than(self.sand_size, &self.phi, &cumf, &mut self.sand_fraction);
@@ -262,10 +319,14 @@ impl Channel {
         self.qb_jli();
 
         // FIXME
-        // println!("qb_jli at 1259\n{:?}", self.trans_rate_jli.slice(s![1259, .., ..]));
-        // println!("bwet at 1259\n{:?}", self.calc_bwet(1259, wl[1259]));
-        // self.calc_bwet_debug(1259, wl[1259]);
-        // println!("wl at 1259\n{:?}", wl[1259]);
+        // let text = self.trans_rate_jli
+        //     .iter()
+        //     .map(|x| format!("{:.16e}", x))
+        //     .collect::<Vec<_>>()
+        //     .join("\n");
+        // std::fs::write("/tmp/rust_array.txt", text).unwrap();
+        //
+        // std::process::exit(0);
 
         // now multiply by bwet
         for c in 0..self.nc {
@@ -275,6 +336,13 @@ impl Channel {
                 .mapv_inplace(|q| q * bwet);
         }
 
+        // let text = self.trans_rate_jli
+        //     .iter()
+        //     .map(|x| format!("{:.16e}", x))
+        //     .collect::<Vec<_>>()
+        //     .join("\n");
+        // std::fs::write("/tmp/rust_array.txt", text).unwrap();
+        // std::process::exit(0);
 
         // the cumulative transport rate
         self.cum_transport.scaled_add(self.dt, &self.trans_rate_jli);
@@ -284,6 +352,7 @@ impl Channel {
 
     // Wilcock & Crowe (2003) eq 9.33 for every chainage at once.
     //
+    // Volumetric bed-load transport rate per unit width: m^3/s / m
     // Updates trans_rate_jli
     pub fn qb_jli(&mut self) {
         let nc = self.nc;
@@ -294,6 +363,7 @@ impl Channel {
 
         // FIXME
         // println!("\ngsv={:?}\nFs={:?}\ndsm={:?}", self.gsv, self.sand_fraction, self.dsm);
+        // println!("\nbedrock={:?}", self.bedrock);
 
 
         for c in 0..nc {
@@ -308,7 +378,7 @@ impl Channel {
                     let tau_rj = tau_rm * ratio.powf(b);
                     let phi = WATER_DENSITY * self.gsv[c].powi(2) / tau_rj;
 
-                    let q = self.acfd[[c, j, l]] * self.gsv[c].powi(3) / (s[l] - 1.0) / GRAVITY;
+                    let q = self.aprop[[c, j, l]] * (self.athickness[[c]] / self.alayer_max_thick) * self.gsv[c].powi(3) / (s[l] - 1.0) / GRAVITY;
                     let w = if phi < 1.35 {
                         0.002 * phi.powf(7.5)
                     } else {
@@ -329,17 +399,23 @@ impl Channel {
 
         let nc = self.nc;
 
+        // println!("Nc is {nc}");
+
         // Calculate bed change rate at each downstream chainage
         //
         // NB: call this dy even though for this loop it is actually dy/dt
         // since that is what we need to figure out the next dt, but don't want
         // to allocate another array
         //
-        let mut dy = Array1::<f64>::zeros(nc - 1); // dy[0] is change at chainage 1
-        for i in 0..nc - 1 {
-            let up_sum = self.trans_rate_jli.index_axis(ndarray::Axis(0), i).sum() + bdy_sed_rate.index_axis(ndarray::Axis(0), i).sum();
-            let my_sum = self.trans_rate_jli.index_axis(ndarray::Axis(0), i + 1).sum();
-            dy[i] = (up_sum - my_sum) * self.fact[i];
+        // FIXME, there must be a way to optimize, we are caculating things twice
+        let mut dy = Array1::<f64>::zeros(nc);
+        for c in 0..nc {
+            let mut up_sum = bdy_sed_rate.index_axis(ndarray::Axis(0), c).sum();
+            if c > 0 {
+                up_sum += self.trans_rate_jli.index_axis(ndarray::Axis(0), c-1).sum()
+            }
+            let my_sum = self.trans_rate_jli.index_axis(ndarray::Axis(0), c).sum();
+            dy[c] = (up_sum - my_sum) * self.fact[c];
         }
 
         // update dt
@@ -351,51 +427,96 @@ impl Channel {
         // now dy really is dy
         
         // aggrade, update bed levels
-        for i in 0..nc - 1 {
-            self.min_bed_level[i+1] += dy[i];
-            self.mean_bed_level[i+1] += dy[i];
+        for c in 0..nc {
+            self.min_bed_level[c] += dy[c];
+            self.mean_bed_level[c] += dy[c];
         }
-        
-        for i in 0..nc - 1 {
-            let my_sum = self.trans_rate_jli.index_axis(ndarray::Axis(0), i + 1).sum();
 
-            // Bed has aggraded, but composition cannot change
-            if my_sum == 0.0 {
-                eprintln!("WARNING: at {i}, total_trans_rate=0, did bed aggregation, but skipping composition change");
-                continue;
+        for c in 0..nc {
+
+            // (nbins, nlith)
+            let mut up_jli = bdy_sed_rate.index_axis(ndarray::Axis(0), c).to_owned();
+            if c > 0 {
+                up_jli += &self.trans_rate_jli.index_axis(ndarray::Axis(0), c-1);
             }
 
-            let fact = self.fact[i] * self.dt;
-            let dy_i = dy[i];
-            let aggrading = dy_i > 0.0;
-            let (chi, morphla) = (self.chi, self.morphla);
+            // (nbins, nlith)
+            let my_jli  = self.trans_rate_jli.index_axis(Axis(0), c);
+            let my_sum = my_jli.sum();
 
-            let up_jli  = self.trans_rate_jli.index_axis(Axis(0), i);
-            let bdy_jli = bdy_sed_rate.index_axis(Axis(0), i);
-            let my_jli  = self.trans_rate_jli.index_axis(Axis(0), i + 1);
-            let scfd  = self.scfd.index_axis(Axis(0), i + 1);
-            let mut acfd = self.acfd.index_axis_mut(Axis(0), i + 1);
+            let fact = self.fact[c] * self.dt;
+            let dy_i = dy[c];
+            let athick = self.athickness[c];
 
-            Zip::from(&mut acfd)
-                .and(&up_jli)
-                .and(&bdy_jli)
-                .and(&my_jli)
-                .and(&scfd)
-                .for_each(|a, &up, &bdy, &my, &s| {
-                    let f_int = if aggrading {
-                        chi * *a + (1.0 - chi) * (my / my_sum)
-                    } else {
-                        s
-                    };
-                    let flux_diff = (up + bdy - my) * fact;
-                    *a += (flux_diff - f_int * dy_i) / morphla;
-                });
+            // split dy_i into the change in active layer thickness, and the remainder into the
+            // shift in active layer (which modifies storage layer)
+            let change_alayer: f64 = if dy_i > 0.0 {
+                (self.alayer_max_thick - athick).max(0.0).min(dy_i)
+            } else {
+                -(athick.max(0.0).min(-dy_i))
+            };
+            let shift_alayer:f64 = dy_i - change_alayer;
+            let new_athick = athick + change_alayer;
+
+            if dy_i > 0.0 {
+                // update storage using current aprop
+                let aprop = self.aprop.index_axis(Axis(0), c);
+                self.storage_layers.aggrade_at(c, &aprop, &my_jli, my_sum, self.chi, shift_alayer);
+
+                // update aprop, doesn't need sprop
+                let mut aprop = self.aprop.index_axis_mut(Axis(0), c);
+                if new_athick > 0.0 {
+                    Zip::from(&mut aprop)
+                        .and(&up_jli)
+                        .and(&my_jli)
+                        .for_each(|a, &up, &my| {
+                            let fi = {
+                                if my_sum == 0.0 {
+                                    *a  // FIXME, check this
+                                } else {
+                                    self.chi * *a + (1.0 - self.chi) * (my / my_sum)
+                                }
+                            };
+                            let dy_jli = (up - my) * fact;
+                            *a = (*a * athick + dy_jli - fi * shift_alayer) / new_athick;
+                        });
+                }
+
+            } else if dy_i < 0.0 {
+                let sprop = self.storage_layers.get_top_sprop_at(c);
+
+                // update aprop
+                let mut aprop = self.aprop.index_axis_mut(Axis(0), c);
+                if new_athick > 0.0 {
+                    Zip::from(&mut aprop)
+                        .and(&up_jli)
+                        .and(&my_jli)
+                        .and(&sprop)
+                        .for_each(|a, &up, &my, &s| {
+                            let dy_jli = (up - my) * fact;
+                            *a = (*a * athick + dy_jli - s * shift_alayer) / new_athick;
+                        });
+                }
+
+                // update storage
+                self.storage_layers.degrade_at(c, shift_alayer);
+            }
+
+            self.athickness[c] = new_athick;
 
 
         }
-
-        // FIXME, change storage layer f_jli
         
+        // let text = self.aprop
+        //     .iter()
+        //     .map(|x| format!("{:.16e}", x))
+        //     .collect::<Vec<_>>()
+        //     .join("\n");
+        // std::fs::write("/tmp/rust_array.txt", text).unwrap();
+
+
+        
+
         // after grain deets
         self.set_grain_arrays();
     }

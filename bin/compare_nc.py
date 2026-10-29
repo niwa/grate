@@ -59,7 +59,13 @@ def compare_netcdf(file1, file2, rtol=1e-6, atol=1e-8):
                     close = np.isclose(xv, yv, rtol=rtol, atol=atol, equal_nan=True)
                     x64 = xv.astype(np.float64)
                     y64 = yv.astype(np.float64)
-                    delta = np.abs(x64 - y64)
+
+                    delta = np.full_like(x64, np.inf)
+                    finite = np.isfinite(x64) & np.isfinite(y64)
+                    np.subtract(x64, y64, out=delta, where=finite)
+                    np.abs(delta, out=delta)
+                    delta[x64 == y64] = 0.0
+
                     rdelta = np.zeros_like(delta)
                     np.divide(
                         delta,
