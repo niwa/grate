@@ -105,20 +105,6 @@ class StorageLayers:
             out[c, :count] = self._sprop[c, idx]
         return out
 
-    def __str__(self):
-        ret = ""
-        for c in range(len(self._count)):
-            ret += f"{self._count[c]:5d}"
-        ret += "\n"
-        for lay in range(self._thickness.shape[1]):
-            for c in range(self._thickness.shape[0]):
-                ret += f"{self._thickness[c, lay]:5.2f}"
-            ret += "\n"
-        for c in range(len(self._head)):
-            ret += f"{self._head[c]:5d}"
-
-        return ret
-
     def add_top_layer(self, c, new_thickness):
         """Insert a new empty top layer at chainage c."""
 

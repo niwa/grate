@@ -71,11 +71,6 @@ class Channel:
             self._min_bed_level - self._bedrock, self.alayer_max_thickness
         )
 
-        # FIXME
-        # print(self._bedrock)
-        # print(self._min_bed_level)
-        # print(self._athickness)
-
         self._storage_layers = StorageLayers(
             cfg, xss, self._min_bed_level - self._bedrock - self._athickness
         )
@@ -206,22 +201,7 @@ class Channel:
     def _calc_Bwet(self, c: int, wl: float) -> float:
         """Return water width"""
         tab = self._profile_tabs[c]["Bwet"]
-        # print(tab[0].xmin, tab[0].xmax)
-        # print(tab[1].xmin, tab[1].xmax)
-        # print(tab[2].xmin, tab[2].xmax)
-        # print(tab[0].get_np() if tab[0] else "hi")
-        # print(tab[1].get_np() if tab[1] else "bye")
-        # print(tab[2].get_np() if tab[2] else "foo")
         d = wl - self._min_bed_level[c]
-        # FIXME
-        # foo = (
-        #     (tab[0].eval(wl) if tab[0] else 0)
-        #     + (tab[1].eval(d) if tab[1] else 0)
-        #     + (tab[2].eval(wl) if tab[2] else 0)
-        # )
-        # print(
-        #     f"Doing calc_Bwet with {wl=} {c=} {d=} {self._min_bed_level[c]} got {foo}"
-        # )
         return (
             (tab[0].eval(wl) if tab[0] else 0)
             + (tab[1].eval(d) if tab[1] else 0)
@@ -284,7 +264,6 @@ class Channel:
 
         # FIXME
         # np.savetxt("/tmp/python_array.txt", self.qb_jli().ravel(), fmt="%.16e")
-        # np.savetxt("/tmp/python_array.txt", self._trans_rate_jli.ravel(), fmt="%.16e")
         # import sys
 
         # sys.exit(0)
@@ -298,11 +277,6 @@ class Channel:
         Volumetric bed-load transport rate per unit width
         m^3/s / m
         """
-
-        # # FIXME
-        # if any(self._sand_fraction < 0):
-        #     print("Sand fraction", self._sand_fraction)
-        #     print(self._aprop[1])
 
         with np.errstate(over="raise"):
             phirm = 0.021 + 0.015 * np.exp(-20 * self._sand_fraction)  # (nc,)
@@ -386,8 +360,6 @@ class Channel:
         # remaining must change storage layer (nc, ), same sign as dy
         shift_alayer = dy - change_alayer
 
-        # print(f"{dy} {change_alayer} {shift_alayer}")
-
         # change thickness and proportion in active where final thickness not 0
         # The denom can be 0 when no active layer and degrading
         f_int = self.f_interface(shift_alayer > 0, p)
@@ -402,18 +374,6 @@ class Channel:
 
         # shift in y must go into storage layer (nc, )
         self._storage_layers.update(f_int, shift_alayer)
-
-        # df = (
-        #     dy_jli - f_int * dy[:, None, None]
-        # ) / self._cfg.morphological.alayer_max_thickness
-        #
-        # self._aprop[1:] += df
-
-        # FIXME
-        np.savetxt("/tmp/python_array.txt", self._aprop.ravel(), fmt="%.16e")
-        # import sys
-        #
-        # sys.exit(0)
 
         # now we can update all the cache variables
         self.set_grain_arrays()

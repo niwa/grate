@@ -172,7 +172,7 @@ where
         Some(b) => b,
         None => {
             eprintln!("WARNING: can't find bracket assuming monotonic f at {x0}");
-            match get_bracket(&f, x0, lower, 100)? {
+            match get_bracket(&f, x0, lower, 1000)? {
                 Some(b) => {
                     eprintln!("Got a bracket using the exhaustive approach");
                     b

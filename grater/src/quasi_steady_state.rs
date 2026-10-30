@@ -148,7 +148,7 @@ impl QuasiSteadyState {
                 Err(e) => {
                     let mut wtr = csv::Writer::from_path("root_finding_failure_f_values.csv")?;
                     wtr.write_record(["wl", "f", "Sf", "u"])?;
-                    let mut wl = bed[i] + 0.0001;
+                    let mut wl = bed[i] + 1e-7;
                     while wl < bed[i] + 10.0 {
                         let fv = f(wl);
                         if -1.0 < fv && fv < 1.0 {

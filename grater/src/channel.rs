@@ -41,7 +41,7 @@ pub struct Channel {
     d90: Array2<f64>,                   // (nc, 3 ) 90 percentile grain size left/channel/right
     bankd90: Array1<f64>,               // (nc, ) 90 percentile grain size on bank (if nan use channel)
     gsv: Array1<f64>,                   // (nc, ) 
-    aprop: Array3<f64>,                 // (nc, nbins, nlith) FIXME
+    aprop: Array3<f64>,                 // (nc, nbins, nlith)
                                         
     // transport arrays
     trans_rate_jli: Array3<f64>,        // (nc, nbins, nlith)
@@ -249,9 +249,6 @@ impl Channel {
         let p = self.calc_p(c, wl);
         let nf = self.calc_nf(c, wl);
 
-        // FIXME
-        // println!("c={} wl={} a={:?}, p={:?}, nf={:?}", c, wl, a, p, nf);
-
         let k: f64 = (0..3)
             .filter(|&i| p[i] != 0.0)
             .map(|i| a[i] * (a[i] / p[i]).powf(2.0 / 3.0) / (self.ng[(c, i)] + nf[i]))
@@ -314,19 +311,8 @@ impl Channel {
     /// Set Qb_jli (called trans_rate_jli)
     /// Needs waterlevel for bwet which we aren't storing
     pub fn set_transport_rates(&mut self, wl: &Array1<f64>) {
-
         // update trans_rate_jli with qb_jli
         self.qb_jli();
-
-        // FIXME
-        // let text = self.trans_rate_jli
-        //     .iter()
-        //     .map(|x| format!("{:.16e}", x))
-        //     .collect::<Vec<_>>()
-        //     .join("\n");
-        // std::fs::write("/tmp/rust_array.txt", text).unwrap();
-        //
-        // std::process::exit(0);
 
         // now multiply by bwet
         for c in 0..self.nc {
@@ -336,18 +322,8 @@ impl Channel {
                 .mapv_inplace(|q| q * bwet);
         }
 
-        // let text = self.trans_rate_jli
-        //     .iter()
-        //     .map(|x| format!("{:.16e}", x))
-        //     .collect::<Vec<_>>()
-        //     .join("\n");
-        // std::fs::write("/tmp/rust_array.txt", text).unwrap();
-        // std::process::exit(0);
-
         // the cumulative transport rate
         self.cum_transport.scaled_add(self.dt, &self.trans_rate_jli);
-        // FIXME
-        // println!("Updating cum trans {}", self.cum_transport.sum());
     }
 
     // Wilcock & Crowe (2003) eq 9.33 for every chainage at once.
@@ -360,11 +336,6 @@ impl Channel {
         let nlith = self.sediment_densities.len();
 
         let s = &self.sediment_densities / WATER_DENSITY;   // (nlith, )
-
-        // FIXME
-        // println!("\ngsv={:?}\nFs={:?}\ndsm={:?}", self.gsv, self.sand_fraction, self.dsm);
-        // println!("\nbedrock={:?}", self.bedrock);
-
 
         for c in 0..nc {
             let phirm = 0.021 + 0.015 * (-20.0 * self.sand_fraction[c]).exp();
@@ -399,23 +370,19 @@ impl Channel {
 
         let nc = self.nc;
 
-        // println!("Nc is {nc}");
-
         // Calculate bed change rate at each downstream chainage
         //
         // NB: call this dy even though for this loop it is actually dy/dt
         // since that is what we need to figure out the next dt, but don't want
         // to allocate another array
         //
-        // FIXME, there must be a way to optimize, we are caculating things twice
         let mut dy = Array1::<f64>::zeros(nc);
+        let mut prev_sum = 0.0;
         for c in 0..nc {
-            let mut up_sum = bdy_sed_rate.index_axis(ndarray::Axis(0), c).sum();
-            if c > 0 {
-                up_sum += self.trans_rate_jli.index_axis(ndarray::Axis(0), c-1).sum()
-            }
             let my_sum = self.trans_rate_jli.index_axis(ndarray::Axis(0), c).sum();
+            let up_sum = bdy_sed_rate.index_axis(ndarray::Axis(0), c).sum() + prev_sum;
             dy[c] = (up_sum - my_sum) * self.fact[c];
+            prev_sum = my_sum;
         }
 
         // update dt
@@ -432,12 +399,13 @@ impl Channel {
             self.mean_bed_level[c] += dy[c];
         }
 
+        let mut prev_jli = None;
         for c in 0..nc {
 
             // (nbins, nlith)
             let mut up_jli = bdy_sed_rate.index_axis(ndarray::Axis(0), c).to_owned();
-            if c > 0 {
-                up_jli += &self.trans_rate_jli.index_axis(ndarray::Axis(0), c-1);
+            if let Some(prev) = prev_jli {
+                up_jli += &prev;
             }
 
             // (nbins, nlith)
@@ -472,7 +440,7 @@ impl Channel {
                         .for_each(|a, &up, &my| {
                             let fi = {
                                 if my_sum == 0.0 {
-                                    *a  // FIXME, check this
+                                    self.chi * *a  // FIXME, check this
                                 } else {
                                     self.chi * *a + (1.0 - self.chi) * (my / my_sum)
                                 }
@@ -503,7 +471,7 @@ impl Channel {
             }
 
             self.athickness[c] = new_athick;
-
+            prev_jli = Some(my_jli);
 
         }
         
